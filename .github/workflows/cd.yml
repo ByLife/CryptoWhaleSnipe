@@ -27,13 +27,13 @@ jobs:
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_KEY }}
           script: |
-            cd /home/lux/dreambot/${{ github.event.inputs.ENVIRONMENT }}/DreamBot
+            cd /home/lux/cryptosnipe/${{ github.event.inputs.ENVIRONMENT }}/CryptoWhaleSnipe
             git stash
             git pull
             git checkout ${{ steps.extract_branch.outputs.branch }}
             git stash
             git pull
-            docker stop dreambot_${{ github.event.inputs.ENVIRONMENT }} || echo "No container running, building new one"
-            docker rm dreambot_${{ github.event.inputs.ENVIRONMENT }} || echo "No container running, building new one"
-            docker rmi dreambot_dreambot_${{ github.event.inputs.ENVIRONMENT }} || echo "No image found, building new one"
+            docker stop cryptosnipe_${{ github.event.inputs.ENVIRONMENT }} || echo "No container running, building new one"
+            docker rm cryptosnipe_${{ github.event.inputs.ENVIRONMENT }} || echo "No container running, building new one"
+            docker rmi cryptosnipe_cryptosnipe_${{ github.event.inputs.ENVIRONMENT }} || echo "No image found, building new one"
             docker-compose -f docker-compose-${{ github.event.inputs.ENVIRONMENT }}.yml up -d --build
