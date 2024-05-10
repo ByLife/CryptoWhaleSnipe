@@ -6,9 +6,12 @@ import Socket from "socket.io"
 import fs from "fs"
 import { config } from "../../config";
 import path from 'path';
-import { redefineSocket } from "./socket_struct.autoload";
 import express from "express";
-import User from "../database/models/User";
+import bearerToken from "express-bearer-token";
+import { set } from "mongoose";
+import EthereumWallet from "../database/models/Wallet";
+import EtherTransaction from "../database/models/EtherTransaction";
+import axios from "axios";
 
 dotenv.config()
 
@@ -17,6 +20,7 @@ export class Autoload { // This is the class that starts the server
     static socket: Socket.Server | null = Boolean(process.env.WEBSOCKETS_API) == true ? new Socket.Server(process.env.SOCKET_PORT ? Number(process.env.SOCKET_PORT) : 3001) : null;
     static port: number = process.env.HTTP_PORT ? Number(process.env.HTTP_PORT) : 3000;
     static baseDir = path.resolve(__dirname, "../socket");
+    static ETH_APIKEY = process.env.ETH_APIKEY;
     
     static rateLimitThreshold = 10000; // 10 000 Events par seconde
     static rateLimitDuration = 10000; // 1 seconde
@@ -122,19 +126,61 @@ export class Autoload { // This is the class that starts the server
     }
     
     protected static attachHandlersToSocket(socket: Socket.Socket) { 
-        const handlers = Autoload.autoloadFilesFromDirectory(path.join(__dirname, '../socket'));
-        Logger.info(`Loading ${handlers.length} socket handlers...`);
-        for (const handler of handlers) {
-            Logger.info(`Loading socket handler ${handler.name}...`);
-            if (handler.name && typeof handler.run === 'function') {
-                socket.on(handler.name, (message: any) => {
-                    Autoload.rateLimiterMiddleware(socket, () => {
-                        handler.run(redefineSocket(socket), message);
-                    });
-                });
+
+    }
+
+    private static async fetchAndUpdateTransactions() {
+        try {
+            const wallets = await EthereumWallet.find();
+            const currentTime = new Date();
+            const yesterday = new Date(currentTime.setDate(currentTime.getDate() - 1)).setHours(0, 0, 0, 0) / 1000; // Start of yesterday in UNIX timestamp
+    
+            for (const wallet of wallets) {
+                for (const address of wallet.wallets) {
+                    // Rate limit control: Manage API calls to respect the rate limit
+                    await new Promise(resolve => setTimeout(resolve, 1000 / 5)); // Delay to keep under 5 req/s
+                    const url = `https://api.etherscan.io/api?module=account&action=tokentx&address=${address}&startblock=0&endblock=99999999&sort=desc&apikey=${Autoload.ETH_APIKEY}`;
+                    Logger.warn(`Fetching transactions for wallet ${address}`);
+                    try {
+                        const response = await axios.get(url);
+                        const transactions = response.data.result;
+    
+                        for (const tx of transactions) {
+                            const timeStamp = parseInt(tx.timeStamp);
+                            if (timeStamp >= yesterday) {
+                                const tokenValue = Number(tx.value) / (10 ** tx.tokenDecimal);
+                                const tokenValueInUsd = tokenValue * (await Autoload.getTokenPriceByContract(tx.contractAddress));
+    
+                                if (!await EtherTransaction.findOne({ hash: tx.hash }) && tokenValueInUsd >= 2000) {
+                                    await new EtherTransaction(tx).save();
+                                    Logger.info(`Saved new transaction ${tx.hash} for wallet ${address}`);
+                                }
+                            } 
+                        }
+                    } catch (error) {
+                        console.error(`Error fetching transactions for wallet ${address}: ${error}`);
+                    }
+                }
             }
+        } catch (error) {
+            Logger.error(`Failed to fetch transactions: ${error}`);
+        }
+        setTimeout(Autoload.fetchAndUpdateTransactions, 5000);
+    }
+    
+    
+    protected static async getTokenPriceByContract(contractAddress: string) {
+        await new Promise(resolve => setTimeout(resolve, 5000));
+        try {
+            const response = await axios.get(`https://api.coingecko.com/api/v3/coins/ethereum/contract/${contractAddress}`);
+            const price = response.data.market_data.current_price.usd; 
+            return price || 0; 
+        } catch (error) {
+            Logger.error(`Failed to fetch token price from CoinGecko: ${error}`);
+            return 0; 
         }
     }
+    
 
     protected static rules() { // This is the function that sets the API rules
         if(!Autoload.app) return
@@ -154,10 +200,13 @@ export class Autoload { // This is the class that starts the server
         Logger.beautifulSpace()
         Logger.info("Starting server...")
         DB_Connect().then(() => {
+            Autoload.fetchAndUpdateTransactions()
             Autoload.rules()
             if(Autoload.app) {
+                Autoload.app.use(bearerToken())
                 Autoload.app.use(express.json()) // This is the middleware that parses the body of the request to JSON format
                 Autoload.autoloadRoutesFromDirectory(path.join(__dirname, '../http'));
+
 
                 Autoload.app.listen(Autoload.port, () => {
                     Logger.success(`Server started on port ${Autoload.port}`)
@@ -166,24 +215,6 @@ export class Autoload { // This is the class that starts the server
 
             if(Autoload.socket){
 
-                Autoload.socket.on("connection", function (socket: Socket.Socket) {
-                    const newSocket = redefineSocket(socket);
-                    socket.on("conn", async (data: string) => {
-                        console.log(data)
-                        if(!data) return socket.emit("conn", "Please provide a token")
-                        const user = await User.findOne({token: data})
-                        console.log(user)
-                        if(!user) return socket.emit("conn", "Invalid token")
-                        newSocket.storage.user = user
-                        newSocket.storage.logged = true
-                        socket.emit("conn", "Connected to the server")
-                        Autoload.attachHandlersToSocket(newSocket);
-                    })  
-                    socket.on("disconnect", () => {
-                        Logger.warn(`Socket ${socket.id} disconnected.`);
-                        socket.disconnect(true)
-                    });
-                });
             }
 
             Logger.beautifulSpace()
