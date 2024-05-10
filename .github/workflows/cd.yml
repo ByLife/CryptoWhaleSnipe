@@ -28,6 +28,7 @@ jobs:
           key: ${{ secrets.SSH_KEY }}
           script: |
             cd /home/lux/cryptosnipe/${{ github.event.inputs.ENVIRONMENT }}/CryptoWhaleSnipe
+            git config --global --add safe.directory /home/lux/cryptosnipe/${{ github.event.inputs.ENVIRONMENT }}/CryptoWhaleSnipe
             git stash
             git pull
             git checkout ${{ steps.extract_branch.outputs.branch }}
