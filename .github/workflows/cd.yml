@@ -3,31 +3,31 @@ name: Deploy API
 
 on:
     workflow_dispatch:
-    inputs:
+      inputs:
         ENVIRONMENT:
-        type: choice
-        description: 'Environment to deploy to'
-        required: true
-        options:
+          type: choice
+          description: 'Environment to deploy to'
+          required: true
+          options:
             - staging
 
 jobs:
-    deploy:
+  deploy:
     name: Deploy
     runs-on: ubuntu-latest
     steps:
-        - name: Extract branch name
+      - name: Extract branch name
         shell: bash
         run: echo "##[set-output name=branch;]$(echo ${GITHUB_REF#refs/heads/})"
         id: extract_branch
-        - name: Update API
+      - name: Update bot
         uses: appleboy/ssh-action@master
         with:
-            host: ${{ secrets.SSH_HOST }}
-            username: ${{ secrets.SSH_USER }}
-            key: ${{ secrets.SSH_KEY }}
-            script: |
-            cd /home/lux/cryptosnipe/${{ github.event.inputs.ENVIRONMENT }}/CryptoWhaleSnipe
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          script: |
+            cd /home/lux/dreambot/${{ github.event.inputs.ENVIRONMENT }}/DreamBot
             git stash
             git pull
             git checkout ${{ steps.extract_branch.outputs.branch }}
