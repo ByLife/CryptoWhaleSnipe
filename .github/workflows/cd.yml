@@ -34,7 +34,7 @@ jobs:
             git checkout ${{ steps.extract_branch.outputs.branch }}
             git stash
             git pull
-            docker stop cryptowhalesnipe_cryptosnipe_${{ github.event.inputs.ENVIRONMENT }}_1 || echo "No container running, building new one"
-            docker rm cryptowhalesnipe_cryptosnipe_${{ github.event.inputs.ENVIRONMENT }}_1 || echo "No container running, building new one"
-            docker rmi cryptowhalesnipe_cryptosnipe_${{ github.event.inputs.ENVIRONMENT }} || echo "No image found, building new one"
+            docker stop cryptowhalesnipe_cryptosnipe${{ github.event.inputs.ENVIRONMENT }}_1 || echo "No container running, building new one"
+            docker rm cryptowhalesnipe_cryptosnipe${{ github.event.inputs.ENVIRONMENT }}_1 || echo "No container running, building new one"
+            docker rmi cryptowhalesnipe_cryptosnipe${{ github.event.inputs.ENVIRONMENT }} || echo "No image found, building new one"
             docker-compose -f docker-compose-${{ github.event.inputs.ENVIRONMENT }}.yml up -d --build
