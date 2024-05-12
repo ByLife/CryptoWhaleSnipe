@@ -18,18 +18,22 @@ Welcome to our API documentation! This guide provides detailed instructions on h
 **Required:** Bearer token authentication.
 
 **Payload:**
+```
 {
   "username": "your_username",
   "wallets": ["wallet_address1", "wallet_address2"]
 }
+```
 
 **Functionality:**
 Creates a wallet for the provided username. If the username already exists, this endpoint will add new wallets to the existing account.
 
 **Response:**
+```
 {
   "wallet_details": "details_here"
 }
+```
 
 ---
 
@@ -42,9 +46,11 @@ Creates a wallet for the provided username. If the username already exists, this
 Returns a list of all created wallets.
 
 **Response:**
+```
 {
   "wallets": ["wallet1_details", "wallet2_details"]
 }
+```
 
 ---
 
@@ -54,17 +60,21 @@ Returns a list of all created wallets.
 **Required:** Bearer token authentication.
 
 **Payload:**
+```
 {
   "username": "your_username"
 }
+```
 
 **Functionality:**
 Fetches and returns information about a user.
 
 **Response:**
+```
 {
   "user_info": "details_here"
 }
+```
 
 ---
 
@@ -74,9 +84,11 @@ Fetches and returns information about a user.
 **Required:** Bearer token authentication.
 
 **Payload:**
+```
 {
   "username": "your_username"
 }
+```
 
 **Functionality:**
 Deletes a user based on the provided username.
@@ -89,20 +101,23 @@ Deletes a user based on the provided username.
 **Required:** Bearer token authentication.
 
 **Payload:**
+```
 {
   "username": "your_username"
 }
+```
 
 **Functionality:**
 Creates a new user and generates a JWT for them.
 
 **Response:**
+```
 {
   "_id": "unique_user_id",
   "username": "username",
   "token": "jwt_token"
 }
-
+```
 ---
 
 ### Recent Transactions
@@ -114,6 +129,7 @@ Creates a new user and generates a JWT for them.
 Retrieves transactions from the last 24 hours across different wallets.
 
 **Response:**
+```
 [
     {
         "username": "username",
@@ -124,5 +140,6 @@ Retrieves transactions from the last 24 hours across different wallets.
     },
     {...}
 ]
+```
 
 ---
