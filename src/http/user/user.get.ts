@@ -15,7 +15,7 @@ export default {
             const user = await AccessBearer.findOne({username: req.body.username})
             if(user) {
                 res.status(200)
-                res.send(user)
+                res.send({user_info: user})
             } else {
                 res.status(200)
                 res.json({error: "User not found"}) 

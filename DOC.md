@@ -8,6 +8,7 @@ Welcome to our API documentation! This guide provides detailed instructions on h
 - **[Get User Information](#get-user-information)**
 - **[Delete User](#delete-user)**
 - **[Create User](#create-user)**
+- **[Recent Transactions](#recent-transactions)**
 
 ---
 
@@ -101,5 +102,27 @@ Creates a new user and generates a JWT for them.
   "username": "username",
   "token": "jwt_token"
 }
+
+---
+
+### Recent Transactions
+#### **Endpoint: `/wallet/transaction/recent` [GET]**
+
+**Required:** Bearer token authentication.
+
+**Functionality:**
+Retrieves transactions from the last 24 hours across different wallets.
+
+**Response:**
+[
+    {
+        "username": "username",
+        "wallet": "wallet_address",
+        "tokenSymbol": "token_symbol",
+        "hash": "transaction_hash",
+        "gasUsed": "gas_used"
+    },
+    {...}
+]
 
 ---
