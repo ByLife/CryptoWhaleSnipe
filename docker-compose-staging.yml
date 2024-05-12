@@ -1,6 +1,6 @@
 version: "3"
 services:
-  cryptosnipe_staging:
+  cryptosnipestaging:
     build: . # build from Dockerfile in current directory
     ports: # map port 4000 on host to port 4000 in container
       - "4000:4000"
