@@ -6,7 +6,7 @@ services:
       - "4000:4000"
     environment: # set environment variables
       - NODE_ENV=production
-# networks:
-#   default:
-#     external:
-#       name: reverse-proxy
+networks:
+  default:
+    external:
+      name: reverse-proxy
