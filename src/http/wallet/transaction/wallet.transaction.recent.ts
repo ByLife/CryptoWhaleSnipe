@@ -11,9 +11,13 @@ export default {
         try {
             if(!req.token) throw "Unauthorized access, missing 'token' in request header"
             if(!await AccessBearer.findOne({token: req.token})) throw "Unauthorized access"
-            const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+
+            // Get all transactions that have a timestamp greater than or equal to 24 hours ago (convert it because its stored as a string in the database)
+            const oneDayAgoInSeconds = Math.floor((Date.now() - 24 * 60 * 60 * 1000) / 1000); // Convert to seconds
             const transactions = await EtherTransaction.find({
-                timeStamp: { $gte: oneDayAgo.getTime() / 1000 }
+                timeStamp: {
+                    $gte: oneDayAgoInSeconds
+                }
             }).lean();
 
             const results = [];
@@ -29,7 +33,7 @@ export default {
                         tokenSymbol: tx.tokenSymbol,
                         hash: tx.hash,
                         gasUsed: tx.gasUsed,
-                        timestamp: tx.timeStamp,
+                        timeStamp: tx.timeStamp,
                     });
                 }
             }
