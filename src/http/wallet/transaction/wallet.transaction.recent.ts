@@ -12,7 +12,6 @@ export default {
             if(!req.token) throw "Unauthorized access, missing 'token' in request header"
             if(!await AccessBearer.findOne({token: req.token})) throw "Unauthorized access"
 
-            // Get all transactions that have a timestamp greater than or equal to 24 hours ago (convert it because its stored as a string in the database)
             const oneDayAgoInSeconds = Math.floor((Date.now() - 24 * 60 * 60 * 1000) / 1000); // Convert to seconds
             const transactions = await EtherTransaction.find({
                 timeStamp: {
@@ -34,6 +33,8 @@ export default {
                         hash: tx.hash,
                         gasUsed: tx.gasUsed,
                         timeStamp: tx.timeStamp,
+                        usdPrice: tx.usdPrice,
+                        value: tx.value,
                     });
                 }
             }
