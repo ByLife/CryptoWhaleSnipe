@@ -152,7 +152,30 @@ export class Autoload { // This is the class that starts the server
                                 const tokenValueInUsd = tokenValue * (await Autoload.getTokenPriceByContract(tx.contractAddress));
     
                                 if (!await EtherTransaction.findOne({ hash: tx.hash }) && tokenValueInUsd >= 2000) {
-                                    await new EtherTransaction(tx).save();
+                                    await new EtherTransaction({
+                                        blockNumber: tx.blockNumber,
+                                        timeStamp: tx.timeStamp,
+                                        hash: tx.hash,
+                                        nonce: tx.nonce,
+                                        transactionIndex: tx.transactionIndex,
+                                        from: tx.from,
+                                        to: tx.to,
+                                        value: tokenValue,
+                                        gas: tx.gas,
+                                        gasPrice: tx.gasPrice,
+                                        isError: tx.isError,
+                                        input: tx.input,
+                                        contractAddress: tx.contractAddress,
+                                        cumulativeGasUsed: tx.cumulativeGasUsed,
+                                        gasUsed: tx.gasUsed,
+                                        confirmations: tx.confirmations,
+                                        methodId: tx.methodId,
+                                        functionName: tx.functionName,
+                                        tokenName: tx.tokenName,
+                                        tokenSymbol: tx.tokenSymbol,
+                                        tokenDecimal: tx.tokenDecimal,
+                                        usdPrice: tokenValueInUsd
+                                    }).save();
                                     Logger.info(`Saved new transaction ${tx.hash} for wallet ${address}`);
                                 }
                             } 

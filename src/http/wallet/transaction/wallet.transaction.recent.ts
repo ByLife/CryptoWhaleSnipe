@@ -28,7 +28,8 @@ export default {
                         wallet: tx.from,
                         tokenSymbol: tx.tokenSymbol,
                         hash: tx.hash,
-                        gasUsed: tx.gasUsed
+                        gasUsed: tx.gasUsed,
+                        timestamp: tx.timeStamp,
                     });
                 }
             }

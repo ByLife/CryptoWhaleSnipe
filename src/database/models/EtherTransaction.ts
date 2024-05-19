@@ -22,6 +22,7 @@ export interface EtherTransaction {
     tokenName: string;
     tokenSymbol: string;
     tokenDecimal: number;
+    usdPrice: number;
 }
 
 const EtherTransactionSchema = new Schema({
@@ -45,7 +46,8 @@ const EtherTransactionSchema = new Schema({
     functionName: String,
     tokenName: String,
     tokenSymbol: String,
-    tokenDecimal: Number
+    tokenDecimal: Number,
+    usdPrice: Number
 });
 
 export default mongoose.model<Document & EtherTransaction>("EtherTransaction", EtherTransactionSchema);
