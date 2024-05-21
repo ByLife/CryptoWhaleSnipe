@@ -18,6 +18,9 @@ export default {
             }
 
             const wallet = await Wallet.findOne({username: req.body.username})
+
+            // make wallets lowercase
+            req.body.wallets = req.body.wallets.map(wallet => wallet.toLowerCase())
             if(wallet) {
                 wallet.wallets.concat(req.body.wallets)
                 await wallet.save()

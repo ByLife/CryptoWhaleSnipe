@@ -19,10 +19,12 @@ export default {
                 }
             }).lean();
 
+            console.log(transactions);
+
             const results = [];
             for (const tx of transactions) {
                 const wallet = await EthereumWallet.findOne({
-                    wallets: tx.from
+                    wallets: { $in: [tx.from, tx.to] }
                 }).lean();
 
                 if (wallet) {
