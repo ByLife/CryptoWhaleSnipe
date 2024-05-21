@@ -13,6 +13,9 @@ export default {
             if(!req.body.username || !req.body.wallets) throw "Missing parameters in request body for creating a user, missing 'username' or 'wallets'"
             if(typeof req.body.username !== "string" || !Array.isArray(req.body.wallets)) throw "Invalid parameters in request body for creating a user, username is not a string or wallets is not an array"
             if(req.body.wallets.length < 1) throw "Wallets array must have at least one element"
+            for(let wallet of req.body.wallets) {
+                if(typeof wallet !== "string") throw "Invalid parameters in request body for creating a user, wallets is not an array of strings"
+            }
 
             const wallet = await Wallet.findOne({username: req.body.username})
             if(wallet) {
@@ -23,7 +26,7 @@ export default {
             } else {
                 const newWallet = new Wallet({
                     username: req.body.username,
-                    wallets: [req.body.wallets]
+                    wallets: req.body.wallets
                 })
                 await newWallet.save()
                 res.status(200)
