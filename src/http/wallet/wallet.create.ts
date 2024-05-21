@@ -1,5 +1,6 @@
 import express from "express";
 import Wallet from "../../database/models/Wallet"
+import AccessBearer from "../../database/models/AccessBearer";
 
 export default {
     name: "/wallet/create",
@@ -8,7 +9,7 @@ export default {
     run: async (req: express.Request, res: express.Response) => {
         try {
             if(!req.token) throw "Unauthorized access, missing 'token' in request header"
-            if(!await Wallet.findOne({token: req.token})) throw "Unauthorized access"
+            if(!await AccessBearer.findOne({token: req.token})) throw "Unauthorized access"
             if(!req.body.username || !req.body.wallets) throw "Missing parameters in request body for creating a user, missing 'username' or 'wallets'"
             if(typeof req.body.username !== "string" || !Array.isArray(req.body.wallets)) throw "Invalid parameters in request body for creating a user, username is not a string or wallets is not an array"
             if(req.body.wallets.length < 1) throw "Wallets array must have at least one element"
