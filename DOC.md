@@ -142,4 +142,31 @@ Retrieves transactions from the last 24 hours across different wallets.
 ]
 ```
 
+### Recent Transactions Summary
+#### **Endpoint: `/wallet/transaction/summary` [GET]**
+
+**Required:** Bearer token authentication.
+
+**Functionality:**
+Retrieves a summary of transactions from the last 24 hours across different wallets.
+
+**Response:**
+```
+{
+    "totalTransaction": 0,
+    "transactions": [
+        {
+            "coin": "PEPE",
+            "transactionCount": 8,
+            "totalAmount": 1000000
+        },
+        {
+            "coin": "BEAM",
+            "transactionCount": 3,
+            "totalAmount": 3000000
+        }
+    ]
+}
+```
+
 ---
