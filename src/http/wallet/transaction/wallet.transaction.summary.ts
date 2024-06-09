@@ -48,19 +48,26 @@ export default {
                 transactionsByCoin[tx.tokenSymbol].push(tx);
             }
 
-            // Calculate total amount for each coin
+            // Calculate total amount for each coin in $USD
             for (const coin in transactionsByCoin) {
                 let totalAmount = 0;
                 for (const tx of transactionsByCoin[coin]) {
-                    totalAmount += tx.value;
+                    totalAmount += tx.usdPrice;
                 }
 
-                results.transactions.push({
-                    coin: coin,
-                    transactionCount: transactionsByCoin[coin].length,
-                    totalAmount: totalAmount
-                });
+                if (totalAmount > 2000) { // Only show coins with total amount > 2000
+                    results.transactions.push({
+                        coin: coin,
+                        transactionCount: transactionsByCoin[coin].length,
+                        totalAmount: Math.round(totalAmount)
+                    })
+                }
             }
+
+            // sort by Transaction Count
+            results.transactions.sort((a, b) => {
+                return b.transactionCount - a.transactionCount;
+            });
 
             // { totalTransaction: 0, transactions: [{PEPE, 8, 1000000}, {BEAM, 3, 3000000}]} array of objects with coin, transaction count, totalAmount
 
