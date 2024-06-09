@@ -19,8 +19,6 @@ export default {
                 }
             }).lean();
 
-            console.log(transactions);
-
             const results = [];
             for (const tx of transactions) {
                 const wallet = await EthereumWallet.findOne({

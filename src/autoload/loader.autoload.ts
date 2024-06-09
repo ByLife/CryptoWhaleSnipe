@@ -140,7 +140,7 @@ export class Autoload { // This is the class that starts the server
                     // Rate limit control: Manage API calls to respect the rate limit
                     await new Promise(resolve => setTimeout(resolve, 1000 / 5)); // Delay to keep under 5 req/s
                     const url = `https://api.etherscan.io/api?module=account&action=tokentx&address=${address}&startblock=0&endblock=99999999&sort=desc&apikey=${Autoload.ETH_APIKEY}`;
-                    Logger.warn(`Fetching transactions for wallet ${address}`);
+                    // Logger.warn(`Fetching transactions for wallet ${address}`);
                     try {
                         const response = await axios.get(url);
                         const transactions = response.data.result;
@@ -181,12 +181,12 @@ export class Autoload { // This is the class that starts the server
                             } 
                         }
                     } catch (error) {
-                        console.error(`Error fetching transactions for wallet ${address}: ${error}`);
+                        // console.error(`Error fetching transactions for wallet ${address}: ${error}`);
                     }
                 }
             }
         } catch (error) {
-            Logger.error(`Failed to fetch transactions: ${error}`);
+            // Logger.error(`Failed to fetch transactions: ${error}`);
         }
         setTimeout(Autoload.fetchAndUpdateTransactions, 5000);
     }
@@ -199,7 +199,7 @@ export class Autoload { // This is the class that starts the server
             const price = response.data.market_data.current_price.usd; 
             return price || 0; 
         } catch (error) {
-            Logger.error(`Failed to fetch token price from CoinGecko: ${error}`);
+            // Logger.error(`Failed to fetch token price from CoinGecko: ${error}`);
             return 0; 
         }
     }
