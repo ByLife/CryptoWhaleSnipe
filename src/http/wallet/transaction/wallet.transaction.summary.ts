@@ -8,11 +8,15 @@ interface Transaction {
   }
 
 interface Results {
-    totalTransaction: number;
+    totalTransaction: number; // Total number of transactions in the last 24 hours
+    totalSell: number; // Total amount of all sell transactions in %USD
+    totalBuy: number; // Total amount of all buy transactions in %USD
     transactions: {
         coin: string;
         transactionCount: number;
         totalAmount: number;
+        totalBuy: number; // Total amount of all buy transactions in %USD
+        totalSell: number; // Total amount of all sell transactions in %USD
     }[];
 }
 
@@ -27,6 +31,8 @@ export default {
 
             const results: Results = {
                 totalTransaction: 0,
+                totalSell: 0,
+                totalBuy: 0,
                 transactions: []
             };
 
@@ -55,11 +61,15 @@ export default {
                     totalAmount += tx.usdPrice;
                 }
 
-                if (totalAmount > 2000) { // Only show coins with total amount > 2000
+                // exclude USDC, USDT, DAI, ETH, WETH, BTC, WBTC and aggregate it into a single value for stablesSum
+
+                if (totalAmount > 10000) { // Only show coins with total amount > 10000
                     results.transactions.push({
                         coin: coin,
                         transactionCount: transactionsByCoin[coin].length,
-                        totalAmount: Math.round(totalAmount)
+                        totalAmount: Math.round(totalAmount),
+                        totalBuy: 0,
+                        totalSell: 0
                     })
                 }
             }
