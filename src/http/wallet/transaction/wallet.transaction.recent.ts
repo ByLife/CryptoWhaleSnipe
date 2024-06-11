@@ -20,23 +20,30 @@ export default {
             }).lean();
 
             const results = [];
+            const arrayStables = ["USDT", "USDC", "DAI", "BUSD", "PAX", "ETH", "WETH", "WBTC"]
             for (const tx of transactions) {
+
                 const wallet = await EthereumWallet.findOne({
                     wallets: { $in: [tx.from, tx.to] }
                 }).lean();
 
-                if (wallet) {
-                    results.push({
-                        username: wallet.username,
-                        wallet: tx.from,
-                        tokenSymbol: tx.tokenSymbol,
-                        hash: tx.hash,
-                        gasUsed: tx.gasUsed,
-                        timeStamp: tx.timeStamp,
-                        usdPrice: tx.usdPrice,
-                        value: tx.value,
-                    });
+                if (!wallet) {
+                    continue;
                 }
+
+                const walletAddress = wallet.wallets.includes(tx.from) ? tx.from : tx.to; 
+
+                results.push({
+                    username: wallet.username,
+                    wallet: walletAddress,
+                    tokenSymbol: tx.tokenSymbol,
+                    hash: tx.hash,
+                    gasUsed: tx.gasUsed,
+                    timeStamp: tx.timeStamp,
+                    usdPrice: tx.usdPrice,
+                    value: tx.value,
+                    type: arrayStables.includes(tx.tokenSymbol) ? "buy" : "sell"
+                });
             }
 
             res.status(200).json(results);
