@@ -20,7 +20,6 @@ export default {
             }).lean();
 
             const results = [];
-            const arrayStables = ["USDT", "USDC", "DAI", "BUSD", "PAX", "ETH", "WETH", "WBTC"]
             for (const tx of transactions) {
 
                 const wallet = await EthereumWallet.findOne({
@@ -42,7 +41,7 @@ export default {
                     timeStamp: tx.timeStamp,
                     usdPrice: tx.usdPrice,
                     value: tx.value,
-                    type: arrayStables.includes(tx.tokenSymbol) ? "buy" : "sell"
+                    type: tx.type
                 });
             }
 
