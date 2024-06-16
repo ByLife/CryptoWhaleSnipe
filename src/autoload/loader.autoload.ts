@@ -21,6 +21,7 @@ export class Autoload { // This is the class that starts the server
     static port: number = process.env.HTTP_PORT ? Number(process.env.HTTP_PORT) : 3000;
     static baseDir = path.resolve(__dirname, "../socket");
     static ETH_APIKEY = process.env.ETH_APIKEY;
+    static ETHPLORER_APIKEY = process.env.ETHPLORER_APIKEY;
     static arrayStables = ["USDT", "USDC", "DAI", "BUSD", "PAX", "ETH", "WETH", "WBTC"]
     
     static rateLimitThreshold = 10000; // 10 000 Events par seconde
@@ -141,18 +142,19 @@ export class Autoload { // This is the class that starts the server
                     // Rate limit control: Manage API calls to respect the rate limit
                     await new Promise(resolve => setTimeout(resolve, 1000 / 5)); // Delay to keep under 5 req/s
                     const url = `https://api.etherscan.io/api?module=account&action=tokentx&address=${address}&startblock=0&endblock=99999999&sort=desc&apikey=${Autoload.ETH_APIKEY}`;
-                    Logger.warn(`Fetching transactions for wallet ${address}`);
+                    // Logger.warn(`Fetching transactions for wallet ${address}`);
                     try {
                         const response = await axios.get(url);
-                        Logger.info(`Response status: ${response.status}`);
                         const transactions = response.data.result;
     
                         for (const tx of transactions) {
                             const timeStamp = parseInt(tx.timeStamp);
                             if (timeStamp >= yesterday) {
                                 const tokenValue = Number(tx.value) / (10 ** tx.tokenDecimal);
+
                                 const tokenValueInUsd = tokenValue * (await Autoload.getTokenPriceByContract(tx.contractAddress));
-    
+                                // Logger.info(`Transaction ${tx.hash} for wallet ${address} with value ${tokenValueInUsd} USD and token ${tx.tokenSymbol} and Contract ${tx.contractAddress}`);
+
                                 if (!await EtherTransaction.findOne({ hash: tx.hash }) && tokenValueInUsd >= 10000) {
                                     await new EtherTransaction({
                                         blockNumber: tx.blockNumber,
@@ -162,7 +164,7 @@ export class Autoload { // This is the class that starts the server
                                         transactionIndex: tx.transactionIndex,
                                         from: tx.from,
                                         to: tx.to,
-                                        value: tokenValue,
+                                        value: tokenValueInUsd,
                                         gas: tx.gas,
                                         gasPrice: tx.gasPrice,
                                         isError: tx.isError,
@@ -177,9 +179,9 @@ export class Autoload { // This is the class that starts the server
                                         tokenSymbol: tx.tokenSymbol,
                                         tokenDecimal: tx.tokenDecimal,
                                         usdPrice: tokenValueInUsd,
-                                        type: Autoload.arrayStables.includes(tx.tokenSymbol) ? "buy" : "sell"
+                                        type: Autoload.arrayStables.includes(tx.tokenSymbol) ? "sell" : "buy"
                                     }).save();
-                                    Logger.info(`Saved new transaction ${tx.hash} for wallet ${address}`);
+                                    // Logger.info(`Saved new transaction ${tx.hash} for wallet ${address}`);
                                 }
                             } 
                         }
@@ -196,14 +198,15 @@ export class Autoload { // This is the class that starts the server
     
     
     protected static async getTokenPriceByContract(contractAddress: string) {
-        await new Promise(resolve => setTimeout(resolve, 5000));
+        // delay to keep under 10 req/s
+        await new Promise(resolve => setTimeout(resolve, 1000 / 10));
         try {
-            const response = await axios.get(`https://api.coingecko.com/api/v3/coins/ethereum/contract/${contractAddress}`);
-            const price = response.data.market_data.current_price.usd; 
-            return price || 0; 
-        } catch (error) {
-            Logger.error(`Failed to fetch token price from CoinGecko: ${error}`);
-            return 0; 
+            const response = await axios.get(`https://api.ethplorer.io/getTokenInfo/${contractAddress}?apiKey=${Autoload.ETHPLORER_APIKEY}`);
+            return response.data.price.rate || 0;
+        }
+        catch (error) {
+            Logger.error(`Failed to fetch token price from Ethplorer: ${error}`);
+            return 0;
         }
     }
     
