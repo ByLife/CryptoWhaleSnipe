@@ -41,7 +41,8 @@ export default {
                     timeStamp: tx.timeStamp,
                     usdPrice: tx.usdPrice,
                     value: tx.value,
-                    type: tx.type
+                    type: tx.type,
+                    tokenSymbol2: tx.tokenSymbol2,
                 });
             }
 
