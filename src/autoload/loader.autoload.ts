@@ -152,8 +152,12 @@ export class Autoload { // This is the class that starts the server
                             if (timeStamp >= yesterday) {
                                 const tokenValue = Number(tx.value) / (10 ** tx.tokenDecimal);
 
-                                const tokenValueInUsd = tokenValue * (await Autoload.getTokenPriceByContract(tx.contractAddress));
-                                // Logger.info(`Transaction ${tx.hash} for wallet ${address} with value ${tokenValueInUsd} USD and token ${tx.tokenSymbol} and Contract ${tx.contractAddress}`);
+                                let res = await Autoload.getTokenPriceAndSymbol(tx.hash, tx.tokenSymbol);
+                                const tokenPriceInUsd = res.price;
+                                const tokenSymbol2 = res.symbol;
+
+                                const tokenValueInUsd = tokenValue * tokenPriceInUsd;
+                                // Logger.info(`Transaction ${tx.hash} for wallet ${address} with value ${tokenValueInUsd} USD and token ${tx.tokenSymbol} and symbol ${tokenSymbol2}, token price ${tokenPriceInUsd}`);
 
                                 if (!await EtherTransaction.findOne({ hash: tx.hash }) && tokenValueInUsd >= 10000) {
                                     await new EtherTransaction({
@@ -177,6 +181,7 @@ export class Autoload { // This is the class that starts the server
                                         functionName: tx.functionName,
                                         tokenName: tx.tokenName,
                                         tokenSymbol: tx.tokenSymbol,
+                                        tokenSymbol2: tokenSymbol2,
                                         tokenDecimal: tx.tokenDecimal,
                                         usdPrice: tokenValueInUsd,
                                         type: Autoload.arrayStables.includes(tx.tokenSymbol) ? "sell" : "buy"
@@ -197,16 +202,35 @@ export class Autoload { // This is the class that starts the server
     }
     
     
-    protected static async getTokenPriceByContract(contractAddress: string) {
+    protected static async getTokenPriceAndSymbol(hash: string, tokenSymbol: string) {
         // delay to keep under 10 req/s
         await new Promise(resolve => setTimeout(resolve, 1000 / 10));
         try {
-            const response = await axios.get(`https://api.ethplorer.io/getTokenInfo/${contractAddress}?apiKey=${Autoload.ETHPLORER_APIKEY}`);
-            return response.data.price.rate || 0;
+            const response = await axios.get(`https://api.ethplorer.io/getTxInfo/${hash}?apiKey=${Autoload.ETHPLORER_APIKEY}`);
+
+            let tokenInfo = {} as any;
+            let tokenPrice = 0;
+            let tokenSymbol2 = '';
+            // for loop to get token different tokenSymbol than the one we are looking for and if its the same, take the price
+            for (let i = 0; i < response.data.operations.length; i++) {
+                tokenInfo = response.data.operations[i].tokenInfo;
+                if (tokenInfo.symbol !== tokenSymbol) {
+                    tokenSymbol2 = tokenInfo.symbol;
+                } else {
+                    tokenPrice = tokenInfo.price.rate || 0;
+                }
+            }
+
+            // Extract the price and symbol
+            const price = tokenPrice || 0;
+            const symbol = tokenSymbol2 || '';
+
+            // Return the price and symbol
+            return { price, symbol };
         }
         catch (error) {
             Logger.error(`Failed to fetch token price from Ethplorer: ${error}`);
-            return 0;
+            return { price: 0, symbol: '' };
         }
     }
     
