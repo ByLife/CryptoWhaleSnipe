@@ -6,6 +6,7 @@ export interface EthereumWallet {
     wallets: string[]; 
     username: string; 
     orderType: string;
+    lastTransaction: Date;
 }
 
 export interface EthereumWalletDocument extends EthereumWallet, Document {}
@@ -33,6 +34,11 @@ const EthereumWalletSchema = new Schema({
         type: String,
         required: false,
         default: "buy"
+    },
+    lastTransaction: {
+        type: Date,
+        required: false,
+        default: null
     }
 
 });

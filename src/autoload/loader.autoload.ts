@@ -136,7 +136,7 @@ export class Autoload { // This is the class that starts the server
             const wallets = await EthereumWallet.find();
             const currentTime = new Date();
             const yesterday = new Date(currentTime.setDate(currentTime.getDate() - 1)).setHours(0, 0, 0, 0) / 1000; // Start of yesterday in UNIX timestamp
-    
+
             for (const wallet of wallets) {
                 for (const address of wallet.wallets) {
                     // Rate limit control: Manage API calls to respect the rate limit
@@ -145,50 +145,61 @@ export class Autoload { // This is the class that starts the server
                     // Logger.warn(`Fetching transactions for wallet ${address}`);
                     try {
                         const response = await axios.get(url);
-                        const transactions = response.data.result;
-    
+                        let transactions = response.data.result;
+
+                        // sort transactions by timestamp and filter out transactions that are older than yesterday
+                        transactions = transactions.sort((a: any, b: any) => parseInt(b.timeStamp) - parseInt(a.timeStamp));
+                        transactions = transactions.filter((tx: any) => parseInt(tx.timeStamp) >= yesterday);
+
+                        // get the last transaction date for the wallet
+                        wallet.lastTransaction = wallet.lastTransaction || new Date(0);
+                        // filter out transactions where the wallet last transaction is newer than the transaction
+                        transactions = transactions.filter((tx: any) => wallet.lastTransaction < new Date(parseInt(tx.timeStamp) * 1000));
+                        
                         for (const tx of transactions) {
-                            const timeStamp = parseInt(tx.timeStamp);
-                            if (timeStamp >= yesterday) {
-                                const tokenValue = Number(tx.value) / (10 ** tx.tokenDecimal);
+                            const tokenValue = Number(tx.value) / (10 ** tx.tokenDecimal);
 
-                                let res = await Autoload.getTokenPriceAndSymbol(tx.hash, tx.tokenSymbol);
-                                const tokenPriceInUsd = res.price;
-                                const tokenSymbol2 = res.symbol;
+                            let res = await Autoload.getTokenPriceAndSymbol(tx.hash, tx.tokenSymbol);
+                            const tokenPriceInUsd = res.price;
+                            const tokenSymbol2 = res.symbol;
 
-                                const tokenValueInUsd = tokenValue * tokenPriceInUsd;
-                                // Logger.info(`Transaction ${tx.hash} for wallet ${address} with value ${tokenValueInUsd} USD and token ${tx.tokenSymbol} and symbol ${tokenSymbol2}, token price ${tokenPriceInUsd}`);
+                            const tokenValueInUsd = tokenValue * tokenPriceInUsd;
+                            // Logger.info(`Transaction ${tx.hash} for wallet ${address} with value ${tokenValueInUsd} USD and token ${tx.tokenSymbol} and symbol ${tokenSymbol2}, token price ${tokenPriceInUsd}`);
 
-                                if (!await EtherTransaction.findOne({ hash: tx.hash }) && tokenValueInUsd >= 10000) {
-                                    await new EtherTransaction({
-                                        blockNumber: tx.blockNumber,
-                                        timeStamp: tx.timeStamp,
-                                        hash: tx.hash,
-                                        nonce: tx.nonce,
-                                        transactionIndex: tx.transactionIndex,
-                                        from: tx.from,
-                                        to: tx.to,
-                                        value: tokenValueInUsd,
-                                        gas: tx.gas,
-                                        gasPrice: tx.gasPrice,
-                                        isError: tx.isError,
-                                        input: tx.input,
-                                        contractAddress: tx.contractAddress,
-                                        cumulativeGasUsed: tx.cumulativeGasUsed,
-                                        gasUsed: tx.gasUsed,
-                                        confirmations: tx.confirmations,
-                                        methodId: tx.methodId,
-                                        functionName: tx.functionName,
-                                        tokenName: tx.tokenName,
-                                        tokenSymbol: tx.tokenSymbol,
-                                        tokenSymbol2: tokenSymbol2,
-                                        tokenDecimal: tx.tokenDecimal,
-                                        usdPrice: tokenValueInUsd,
-                                        type: Autoload.arrayStables.includes(tx.tokenSymbol) ? "sell" : "buy"
-                                    }).save();
-                                    // Logger.info(`Saved new transaction ${tx.hash} for wallet ${address}`);
-                                }
-                            } 
+                            if (!await EtherTransaction.findOne({ hash: tx.hash }) && tokenValueInUsd >= 10000) {
+                                await new EtherTransaction({
+                                    blockNumber: tx.blockNumber,
+                                    timeStamp: tx.timeStamp,
+                                    hash: tx.hash,
+                                    nonce: tx.nonce,
+                                    transactionIndex: tx.transactionIndex,
+                                    from: tx.from,
+                                    to: tx.to,
+                                    value: tokenValueInUsd,
+                                    gas: tx.gas,
+                                    gasPrice: tx.gasPrice,
+                                    isError: tx.isError,
+                                    input: tx.input,
+                                    contractAddress: tx.contractAddress,
+                                    cumulativeGasUsed: tx.cumulativeGasUsed,
+                                    gasUsed: tx.gasUsed,
+                                    confirmations: tx.confirmations,
+                                    methodId: tx.methodId,
+                                    functionName: tx.functionName,
+                                    tokenName: tx.tokenName,
+                                    tokenSymbol: tx.tokenSymbol,
+                                    tokenSymbol2: tokenSymbol2,
+                                    tokenDecimal: tx.tokenDecimal,
+                                    usdPrice: tokenValueInUsd,
+                                    type: Autoload.arrayStables.includes(tx.tokenSymbol) ? "sell" : "buy"
+                                }).save();
+
+                                // Logger.info(`Saved new transaction ${tx.hash} for wallet ${address}`);
+                            }
+
+                            // save the last transaction date for the wallet to avoid fetching the same transactions again
+                            wallet.lastTransaction = new Date();
+                            wallet.save();
                         }
                     } catch (error) {
                         // console.error(`Error fetching transactions for wallet ${address}: ${error}`);
@@ -214,7 +225,7 @@ export class Autoload { // This is the class that starts the server
             // for loop to get token different tokenSymbol than the one we are looking for and if its the same, take the price
             for (let i = 0; i < response.data.operations.length; i++) {
                 tokenInfo = response.data.operations[i].tokenInfo;
-                if (tokenInfo.symbol !== tokenSymbol) {
+                if (tokenInfo.symbol !== tokenSymbol && tokenInfo.symbol.toLowerCase() !== tokenSymbol.toLowerCase()) {
                     tokenSymbol2 = tokenInfo.symbol;
                 } else {
                     tokenPrice = tokenInfo.price.rate || 0;
