@@ -1,5 +1,5 @@
 import express from "express";
-import Wallet from "../../database/models/Wallet"
+import Wallet from "../../database/models/EtherWallet"
 import AccessBearer from "../../database/models/AccessBearer";
 
 export default {

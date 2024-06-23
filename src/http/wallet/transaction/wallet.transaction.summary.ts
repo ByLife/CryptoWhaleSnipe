@@ -1,6 +1,6 @@
 import express from "express";
 import EtherTransaction from '../../../database/models/EtherTransaction';
-import EthereumWallet from '../../../database/models/Wallet';
+import EthereumWallet from '../../../database/models/EtherWallet';
 import AccessBearer from "../../../database/models/AccessBearer";
 
 interface Transaction {

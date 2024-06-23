@@ -9,8 +9,10 @@ import path from 'path';
 import express from "express";
 import bearerToken from "express-bearer-token";
 import { set } from "mongoose";
-import EthereumWallet from "../database/models/Wallet";
+import EthereumWallet from "../database/models/EtherWallet";
 import EtherTransaction from "../database/models/EtherTransaction";
+import SolanaWallet from "../database/models/SolWallet";
+import SolTransaction from "../database/models/SolTransaction";
 import axios from "axios";
 
 dotenv.config()
@@ -130,6 +132,96 @@ export class Autoload { // This is the class that starts the server
     protected static attachHandlersToSocket(socket: Socket.Socket) { 
 
     }
+
+    private static async fetchAndUpdateSolanaTransactions() {
+        try {
+            const solanaWallets = await SolanaWallet.find();
+    
+            for (const wallet of solanaWallets) {
+                for (const address of wallet.wallets) {
+                    await new Promise(resolve => setTimeout(resolve, 1000 / 5)); 
+    
+                    const params = JSON.stringify({
+                        jsonrpc: "2.0",
+                        id: 1,
+                        method: "getConfirmedSignaturesForAddress2",
+                        params: [
+                            address,
+                            { limit: 20 }
+                        ]
+                    });
+    
+                    const rpcUrl = 'https://api.mainnet-beta.solana.com';
+    
+                    try {
+                        const signaturesResponse = await axios.post(rpcUrl, params, {
+                            headers: {'Content-Type': 'application/json'}
+                        });
+    
+                        let signatures = signaturesResponse.data.result;
+    
+                        for (const sigInfo of signatures) {
+                            const txParams = JSON.stringify({
+                                jsonrpc: "2.0",
+                                id: 1,
+                                method: "getTransaction",
+                                params: [
+                                    sigInfo.signature,
+                                    "jsonParsed"
+                                ]
+                            });
+    
+                            const txResponse = await axios.post(rpcUrl, txParams, {
+                                headers: {'Content-Type': 'application/json'}
+                            });
+    
+                            const transactionDetails = txResponse.data.result;
+                            if (!transactionDetails) continue;
+    
+                            const { transaction, meta } = transactionDetails;
+                            const postTokenBalances = meta.postTokenBalances;
+                            const preTokenBalances = meta.preTokenBalances;
+    
+                            const swaps = [];
+    
+                            if (postTokenBalances && preTokenBalances) {
+                                for (const postBalance of postTokenBalances) {
+                                    const preBalance = preTokenBalances.find((pre: { mint: any; }) => pre.mint === postBalance.mint);
+                                    if (preBalance) {
+                                        const amountChange = postBalance.uiTokenAmount.uiAmount - preBalance.uiTokenAmount.uiAmount;
+                                        const tokenSymbol = postBalance.uiTokenAmount.tokenSymbol || 'Unknown Token';
+    
+                                        swaps.push({
+                                            tokenSymbol: tokenSymbol,
+                                            amountChange: amountChange
+                                        });
+                                    }
+                                }
+                            }
+    
+                            swaps.forEach(swap => {
+                                console.log(`${swap.tokenSymbol}: ${swap.amountChange > 0 ? '+' : ''}${swap.amountChange}`);
+                            });
+    
+                            await new SolTransaction({
+                                signature: sigInfo.signature,
+                                blockTime: transactionDetails.blockTime,
+                                slot: transactionDetails.slot,
+                                swaps: swaps
+                            }).save();
+                        }
+    
+                    } catch (error) {
+                        Logger.error(`Error fetching Solana transactions for wallet ${address}: ${error}`);
+                    }
+                }
+            }
+        } catch (error) {
+            Logger.error(`Failed to fetch Solana transactions: ${error}`);
+        }
+        setTimeout(Autoload.fetchAndUpdateSolanaTransactions, 5000); // Schedule the next update
+    }
+    
 
     private static async fetchAndUpdateTransactions() {
         try {
@@ -260,32 +352,31 @@ export class Autoload { // This is the class that starts the server
         })
     }
 
-    public static start() { // This is the function that starts the server
+    public static start() {
         Logger.beautifulSpace()
         Logger.info("Starting server...")
         DB_Connect().then(() => {
-            Autoload.fetchAndUpdateTransactions()
+            Autoload.fetchAndUpdateTransactions(); // Pour Ethereum
+            Autoload.fetchAndUpdateSolanaTransactions(); // Pour Solana
             Autoload.rules()
             if(Autoload.app) {
+                EthereumWallet.find().then(console.log)
                 Autoload.app.use(bearerToken())
-                Autoload.app.use(express.json()) // This is the middleware that parses the body of the request to JSON format
+                Autoload.app.use(express.json())
                 Autoload.autoloadRoutesFromDirectory(path.join(__dirname, '../http'));
-
-
+    
                 Autoload.app.listen(Autoload.port, () => {
                     Logger.success(`Server started on port ${Autoload.port}`)
                 });
             }
-
-            if(Autoload.socket){
-
-            }
-
+    
             Logger.beautifulSpace()
             Autoload.logInfo()
             Logger.beautifulSpace()
         })
     }
+    
+
 
     public static stop() { // This is the function that stops the server
         if(Autoload.socket) Autoload.socket.close()
