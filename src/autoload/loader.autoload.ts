@@ -313,7 +313,7 @@ export class Autoload { // This is the class that starts the server
 
             let tokenInfo = {} as any;
             let tokenPrice = 0;
-            let tokenSymbol2 = '';
+            let tokenSymbol2 = 'exchange';
             // for loop to get token different tokenSymbol than the one we are looking for and if its the same, take the price
             for (let i = 0; i < response.data.operations.length; i++) {
                 tokenInfo = response.data.operations[i].tokenInfo;
@@ -325,8 +325,8 @@ export class Autoload { // This is the class that starts the server
             }
 
             // Extract the price and symbol
-            const price = tokenPrice || 0;
-            const symbol = tokenSymbol2 || '';
+            const price = tokenPrice
+            const symbol = tokenSymbol2
 
             // Return the price and symbol
             return { price, symbol };
