@@ -256,7 +256,7 @@ export class Autoload { // This is the class that starts the server
                             const tokenSymbol2 = res.symbol;
 
                             const tokenValueInUsd = tokenValue * tokenPriceInUsd;
-                            Logger.info(`Transaction ${tx.hash} for wallet ${address} with value ${tokenValueInUsd} USD and token ${tx.tokenSymbol} and symbol ${tokenSymbol2}, token price ${tokenPriceInUsd}`);
+                            // Logger.info(`Transaction ${tx.hash} for wallet ${address} with value ${tokenValueInUsd} USD and token ${tx.tokenSymbol} and symbol ${tokenSymbol2}, token price ${tokenPriceInUsd}`);
 
                             if (!await EtherTransaction.findOne({ hash: tx.hash }) && tokenValueInUsd >= 10000) {
                                 await new EtherTransaction({
