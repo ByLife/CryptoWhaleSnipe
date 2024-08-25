@@ -256,6 +256,7 @@ export class Autoload { // This is the class that starts the server
                             const tokenSymbol2 = res.symbol;
 
                             const tokenValueInUsd = tokenValue * tokenPriceInUsd;
+                            // Logger.info(`Token value in USD: ${tokenValueInUsd} with tokenValue: ${tokenValue} and tokenPriceInUsd: ${tokenPriceInUsd}`);
                             // Logger.info(`Transaction ${tx.hash} for wallet ${address} with value ${tokenValueInUsd} USD and token ${tx.tokenSymbol} and symbol ${tokenSymbol2}, token price ${tokenPriceInUsd}`);
 
                             if (!await EtherTransaction.findOne({ hash: tx.hash }) && tokenValueInUsd >= 10000) {
@@ -317,8 +318,10 @@ export class Autoload { // This is the class that starts the server
             // for loop to get token different tokenSymbol than the one we are looking for (and if the from or to address field has the wallet address). If its the same, take the price
             for (let i = 0; i < response.data.operations.length; i++) {
                 tokenInfo = response.data.operations[i].tokenInfo;
-                if (tokenInfo.symbol !== tokenSymbol && tokenInfo.symbol.toLowerCase() !== tokenSymbol.toLowerCase() && (response.data.operations[i].from === walletAddress || response.data.operations[i].to === walletAddress)) {
-                    tokenSymbol2 = tokenInfo.symbol;
+                if (tokenInfo.symbol !== tokenSymbol && tokenInfo.symbol.toLowerCase() !== tokenSymbol.toLowerCase()) {
+                    if ((response.data.operations[i].from === walletAddress || response.data.operations[i].to === walletAddress)) {
+                        tokenSymbol2 = tokenInfo.symbol;
+                    }
                 } else {
                     tokenPrice = tokenInfo.price.rate || 0;
                 }
@@ -360,7 +363,7 @@ export class Autoload { // This is the class that starts the server
             Autoload.fetchAndUpdateSolanaTransactions(); // Pour Solana
             Autoload.rules()
             if(Autoload.app) {
-                EthereumWallet.find().then(console.log)
+                // EthereumWallet.find().then(console.log)
                 Autoload.app.use(bearerToken())
                 Autoload.app.use(express.json())
                 Autoload.autoloadRoutesFromDirectory(path.join(__dirname, '../http'));
