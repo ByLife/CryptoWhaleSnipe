@@ -251,12 +251,12 @@ export class Autoload { // This is the class that starts the server
                         for (const tx of transactions) {
                             const tokenValue = Number(tx.value) / (10 ** tx.tokenDecimal);
 
-                            let res = await Autoload.getTokenPriceAndSymbol(tx.hash, tx.tokenSymbol);
+                            let res = await Autoload.getTokenPriceAndSymbol(tx.hash, tx.tokenSymbol, address);
                             const tokenPriceInUsd = res.price;
                             const tokenSymbol2 = res.symbol;
 
                             const tokenValueInUsd = tokenValue * tokenPriceInUsd;
-                            // Logger.info(`Transaction ${tx.hash} for wallet ${address} with value ${tokenValueInUsd} USD and token ${tx.tokenSymbol} and symbol ${tokenSymbol2}, token price ${tokenPriceInUsd}`);
+                            Logger.info(`Transaction ${tx.hash} for wallet ${address} with value ${tokenValueInUsd} USD and token ${tx.tokenSymbol} and symbol ${tokenSymbol2}, token price ${tokenPriceInUsd}`);
 
                             if (!await EtherTransaction.findOne({ hash: tx.hash }) && tokenValueInUsd >= 10000) {
                                 await new EtherTransaction({
@@ -305,7 +305,7 @@ export class Autoload { // This is the class that starts the server
     }
     
     
-    protected static async getTokenPriceAndSymbol(hash: string, tokenSymbol: string) {
+    protected static async getTokenPriceAndSymbol(hash: string, tokenSymbol: string, walletAddress: string) {
         // delay to keep under 10 req/s
         await new Promise(resolve => setTimeout(resolve, 1000 / 10));
         try {
@@ -314,10 +314,10 @@ export class Autoload { // This is the class that starts the server
             let tokenInfo = {} as any;
             let tokenPrice = 0;
             let tokenSymbol2 = 'exchange';
-            // for loop to get token different tokenSymbol than the one we are looking for and if its the same, take the price
+            // for loop to get token different tokenSymbol than the one we are looking for (and if the from or to address field has the wallet address). If its the same, take the price
             for (let i = 0; i < response.data.operations.length; i++) {
                 tokenInfo = response.data.operations[i].tokenInfo;
-                if (tokenInfo.symbol !== tokenSymbol && tokenInfo.symbol.toLowerCase() !== tokenSymbol.toLowerCase()) {
+                if (tokenInfo.symbol !== tokenSymbol && tokenInfo.symbol.toLowerCase() !== tokenSymbol.toLowerCase() && (response.data.operations[i].from === walletAddress || response.data.operations[i].to === walletAddress)) {
                     tokenSymbol2 = tokenInfo.symbol;
                 } else {
                     tokenPrice = tokenInfo.price.rate || 0;
