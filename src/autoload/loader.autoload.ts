@@ -295,75 +295,84 @@ export class Autoload { // This is the class that starts the server
         try {
             const wallets = await EthereumWallet.find();
             const currentTime = new Date();
-            const yesterday = new Date(currentTime.setDate(currentTime.getDate() - 1)).setHours(0, 0, 0, 0) / 1000; // Start of yesterday in UNIX timestamp
-
+            const yesterday = new Date(currentTime.setDate(currentTime.getDate() - 1)).setHours(0, 0, 0, 0) / 1000;
+    
             for (const wallet of wallets) {
                 for (const address of wallet.wallets) {
-                    // Rate limit control: Manage API calls to respect the rate limit
-                    await new Promise(resolve => setTimeout(resolve, 1000 / 5)); // Delay to keep under 5 req/s
+                    await new Promise(resolve => setTimeout(resolve, 1000 / 5));
                     const url = `https://api.etherscan.io/api?module=account&action=tokentx&address=${address}&startblock=0&endblock=99999999&sort=desc&apikey=${Autoload.ETH_APIKEY}`;
-                    // Logger.warn(`Fetching transactions for wallet ${address}`);
+    
                     try {
                         const response = await axios.get(url);
+                        if (!response.data || !response.data.result) continue;
+                        
                         let transactions = response.data.result;
-
-                        // sort transactions by timestamp and filter out transactions that are older than yesterday
-                        transactions = transactions.sort((a: any, b: any) => parseInt(b.timeStamp) - parseInt(a.timeStamp));
-                        transactions = transactions.filter((tx: any) => parseInt(tx.timeStamp) >= yesterday);
-
-                        // get the last transaction date for the wallet
+                        transactions = transactions
+                            .sort((a: any, b: any) => parseInt(b.timeStamp) - parseInt(a.timeStamp))
+                            .filter((tx: any) => parseInt(tx.timeStamp) >= yesterday);
+    
                         wallet.lastTransaction = wallet.lastTransaction || new Date(0);
-                        // filter out transactions where the wallet last transaction is newer than the transaction
                         transactions = transactions.filter((tx: any) => wallet.lastTransaction < new Date(parseInt(tx.timeStamp) * 1000));
                         
                         for (const tx of transactions) {
-                            const tokenValue = Number(tx.value) / (10 ** tx.tokenDecimal);
-
-                            let res = await Autoload.getTokenPriceAndSymbol(tx.hash, tx.tokenSymbol, address);
-                            const tokenPriceInUsd = res.price;
-                            const tokenSymbol2 = res.symbol;
-
-                            const tokenValueInUsd = tokenValue * tokenPriceInUsd;
-                            // Logger.info(`Token value in USD: ${tokenValueInUsd} with tokenValue: ${tokenValue} and tokenPriceInUsd: ${tokenPriceInUsd}`);
-                            // Logger.info(`Transaction ${tx.hash} for wallet ${address} with value ${tokenValueInUsd} USD and token ${tx.tokenSymbol} and symbol ${tokenSymbol2}, token price ${tokenPriceInUsd}`);
-
-                            if (!await EtherTransaction.findOne({ hash: tx.hash }) && tokenValueInUsd >= 10000) {
-                                await new EtherTransaction({
-                                    blockNumber: tx.blockNumber,
-                                    timeStamp: tx.timeStamp,
-                                    hash: tx.hash,
-                                    nonce: tx.nonce,
-                                    transactionIndex: tx.transactionIndex,
-                                    from: tx.from,
-                                    to: tx.to,
-                                    value: tokenValueInUsd,
-                                    gas: tx.gas,
-                                    gasPrice: tx.gasPrice,
-                                    isError: tx.isError,
-                                    input: tx.input,
-                                    contractAddress: tx.contractAddress,
-                                    cumulativeGasUsed: tx.cumulativeGasUsed,
-                                    gasUsed: tx.gasUsed,
-                                    confirmations: tx.confirmations,
-                                    methodId: tx.methodId,
-                                    functionName: tx.functionName,
-                                    tokenName: tx.tokenName,
-                                    tokenSymbol: tx.tokenSymbol,
-                                    tokenSymbol2: tokenSymbol2,
-                                    tokenDecimal: tx.tokenDecimal,
-                                    usdPrice: tokenValueInUsd,
-                                    type: Autoload.arrayStables.includes(tx.tokenSymbol) ? "sell" : "buy"
-                                }).save();
-
-                                // Logger.info(`Saved new transaction ${tx.hash} for wallet ${address}`);
+                            try {
+                                const tokenValue = Number(tx.value) / (10 ** tx.tokenDecimal);
+                                let res = await Autoload.getTokenPriceAndSymbol(tx.hash, tx.tokenSymbol, address);
+                                const tokenPriceInUsd = res.price;
+                                const tokenSymbol2 = res.symbol;
+                                const tokenValueInUsd = tokenValue * tokenPriceInUsd;
+    
+                                if (!await EtherTransaction.findOne({ hash: tx.hash }) && tokenValueInUsd >= 10000) {
+                                    // Determine transaction type based on the wallet's role
+                                    const isReceiving = tx.to.toLowerCase() === address.toLowerCase();
+                                    let transactionType = "unknown";
+                                    
+                                    if (Autoload.arrayStables.includes(tx.tokenSymbol)) {
+                                        // For stablecoins, receiving is sell (got USDT) and sending is buy (spent USDT)
+                                        transactionType = isReceiving ? "sell" : "buy";
+                                    } else {
+                                        // For non-stablecoins, receiving is buy (got tokens) and sending is sell (sold tokens)
+                                        transactionType = isReceiving ? "buy" : "sell";
+                                    }
+    
+                                    await new EtherTransaction({
+                                        blockNumber: tx.blockNumber,
+                                        timeStamp: tx.timeStamp,
+                                        hash: tx.hash,
+                                        nonce: tx.nonce,
+                                        transactionIndex: tx.transactionIndex,
+                                        from: tx.from,
+                                        to: tx.to,
+                                        value: tokenValueInUsd,
+                                        gas: tx.gas,
+                                        gasPrice: tx.gasPrice,
+                                        isError: tx.isError,
+                                        input: tx.input,
+                                        contractAddress: tx.contractAddress,
+                                        cumulativeGasUsed: tx.cumulativeGasUsed,
+                                        gasUsed: tx.gasUsed,
+                                        confirmations: tx.confirmations,
+                                        methodId: tx.methodId,
+                                        functionName: tx.functionName,
+                                        tokenName: tx.tokenName,
+                                        tokenSymbol: tx.tokenSymbol,
+                                        tokenSymbol2: tokenSymbol2,
+                                        tokenDecimal: tx.tokenDecimal,
+                                        usdPrice: tokenValueInUsd,
+                                        type: transactionType
+                                    }).save();
+                                }
+    
+                                wallet.lastTransaction = new Date();
+                                await wallet.save();
+                            } catch (txError) {
+                                Logger.error(`Error processing transaction ${tx.hash}: ${txError}`);
+                                continue;
                             }
-
-                            // save the last transaction date for the wallet to avoid fetching the same transactions again
-                            wallet.lastTransaction = new Date();
-                            wallet.save();
                         }
-                    } catch (error) {
-                        // console.error(`Error fetching transactions for wallet ${address}: ${error}`);
+                    } catch (walletError) {
+                        Logger.error(`Error fetching transactions for wallet ${address}: ${walletError}`);
+                        continue;
                     }
                 }
             }

@@ -16,22 +16,68 @@ export class TokenPriceCache {
         }
 
         try {
-            const response = await axios.get(`https://api.coingecko.com/api/v3/coins/ethereum/contract/${contractAddress}`, {
-                timeout: 5000  // 5 seconds timeout
-            });
-            const price = response.data.market_data.current_price.usd || 0;
+            // Try CoinGecko first
+            const price = await this.getPriceFromCoinGecko(contractAddress);
+            
+            // If CoinGecko fails, try DEX data
+            if (!price) {
+                const dexPrice = await this.getPriceFromDex(contractAddress);
+                if (dexPrice) {
+                    TokenPriceCache.prices.set(contractAddress, {
+                        price: dexPrice,
+                        timestamp: Date.now()
+                    });
+                    return dexPrice;
+                }
+            }
 
             TokenPriceCache.prices.set(contractAddress, {
-                price: price,
+                price: price || 0,
                 timestamp: Date.now()
             });
 
-            console.log(TokenPriceCache.prices);
-
-            return price;
+            return price || 0;
         } catch (error) {
-            Logger.error(`Failed to fetch token price from CoinGecko: ${error}`);
-            return 0; 
+            Logger.error(`Failed to fetch token price: ${error}`);
+            return 0;
+        }
+    }
+
+    private static async getPriceFromDex(contractAddress: string) {
+        try {
+            const response = await axios.post('https://api.thegraph.com/subgraphs/name/uniswap/uniswap-v2', {
+                query: `{
+                    token(id: "${contractAddress.toLowerCase()}") {
+                        derivedETH
+                    }
+                    bundle(id: "1") {
+                        ethPrice
+                    }
+                }`
+            });
+
+            if (response.data?.data?.token?.derivedETH && response.data?.data?.bundle?.ethPrice) {
+                const derivedETH = parseFloat(response.data.data.token.derivedETH);
+                const ethPrice = parseFloat(response.data.data.bundle.ethPrice);
+                return derivedETH * ethPrice;
+            }
+
+            return 0;
+        } catch (error) {
+            Logger.error(`Failed to fetch DEX price: ${error}`);
+            return 0;
+        }
+    }
+
+    private static async getPriceFromCoinGecko(contractAddress: string) {
+        try {
+            const response = await axios.get(
+                `https://api.coingecko.com/api/v3/coins/ethereum/contract/${contractAddress}`,
+                { timeout: 5000 }
+            );
+            return response.data.market_data?.current_price?.usd || 0;
+        } catch (error) {
+            return 0;
         }
     }
 }
