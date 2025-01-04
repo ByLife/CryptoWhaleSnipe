@@ -1,3 +1,5 @@
+// src/autoload/loader.autoload.ts
+
 import dotenv from "dotenv"
 import Logger from "../logger"
 import http from "http"
@@ -14,6 +16,8 @@ import EtherTransaction from "../database/models/EtherTransaction";
 import SolanaWallet from "../database/models/SolWallet";
 import SolTransaction from "../database/models/SolTransaction";
 import axios from "axios";
+import BnbTransaction from "../database/models/BnbTransaction";
+import BnbWallet from "../database/models/BnbWallet";
 
 dotenv.config()
 
@@ -29,6 +33,9 @@ export class Autoload { // This is the class that starts the server
     static rateLimitThreshold = 10000; // 10 000 Events par seconde
     static rateLimitDuration = 10000; // 1 seconde
     static clients = new Map();
+
+    static BSC_APIKEY = process.env.BSC_APIKEY;
+    static arrayStablesBNB = ["BUSD", "USDT", "USDC", "DAI", "CAKE", "BNB", "WBNB"];
 
     constructor() {
         Autoload.port = Number(process.env.HTTP_PORT) || 3000
@@ -221,6 +228,67 @@ export class Autoload { // This is the class that starts the server
         }
         setTimeout(Autoload.fetchAndUpdateSolanaTransactions, 5000); // Schedule the next update
     }
+
+    private static async fetchAndUpdateBnbTransactions() {
+        try {
+            const wallets = await BnbWallet.find();
+            const currentTime = new Date();
+            const yesterday = new Date(currentTime.setDate(currentTime.getDate() - 1)).setHours(0, 0, 0, 0) / 1000;
+    
+            for (const wallet of wallets) {
+                for (const address of wallet.wallets) {
+                    await new Promise(resolve => setTimeout(resolve, 1000 / 5));
+                    const url = `https://api.bscscan.com/api?module=account&action=tokentx&address=${address}&startblock=0&endblock=99999999&sort=desc&apikey=${process.env.BSC_APIKEY}`;
+    
+                    try {
+                        const response = await axios.get(url);
+                        let transactions = response.data.result;
+    
+                        transactions = transactions
+                            .sort((a: any, b: any) => parseInt(b.timeStamp) - parseInt(a.timeStamp))
+                            .filter((tx: any) => parseInt(tx.timeStamp) >= yesterday)
+                            .filter((tx: any) => wallet.lastTransaction < new Date(parseInt(tx.timeStamp) * 1000));
+    
+                        for (const tx of transactions) {
+                            const tokenValue = Number(tx.value) / (10 ** tx.tokenDecimal);
+                            
+                            // Get price from PancakeSwap API for BNB Chain tokens
+                            const priceResponse = await axios.get(`https://api.pancakeswap.info/api/v2/tokens/${tx.contractAddress}`);
+                            const tokenPriceInUsd = priceResponse.data.data.price || 0;
+                            const tokenValueInUsd = tokenValue * tokenPriceInUsd;
+    
+                            if (!await BnbTransaction.findOne({ hash: tx.hash }) && tokenValueInUsd >= 10000) {
+                                await new BnbTransaction({
+                                    ...tx,
+                                    value: tokenValueInUsd,
+                                    usdPrice: tokenValueInUsd,
+                                    type: Autoload.arrayStables.includes(tx.tokenSymbol) ? "sell" : "buy"
+                                }).save();
+                            }
+    
+                            wallet.lastTransaction = new Date();
+                            await wallet.save();
+                        }
+                    } catch (error) {
+                        Logger.error(`Error fetching BNB transactions for wallet ${address}: ${error}`);
+                    }
+                }
+            }
+        } catch (error) {
+            Logger.error(`Failed to fetch BNB transactions: ${error}`);
+        }
+        setTimeout(Autoload.fetchAndUpdateBnbTransactions, 5000);
+    }
+    
+    private static async getTokenPriceFromPancakeSwap(tokenAddress: string): Promise<number> {
+        try {
+            const response = await axios.get(`https://api.pancakeswap.info/api/v2/tokens/${tokenAddress}`);
+            return response.data.data.price || 0;
+        } catch (error) {
+            Logger.error(`Failed to fetch token price from PancakeSwap: ${error}`);
+            return 0;
+        }
+    }   
     
 
     private static async fetchAndUpdateTransactions() {
@@ -359,11 +427,11 @@ export class Autoload { // This is the class that starts the server
         Logger.beautifulSpace()
         Logger.info("Starting server...")
         DB_Connect().then(() => {
-            Autoload.fetchAndUpdateTransactions(); // Pour Ethereum
-            Autoload.fetchAndUpdateSolanaTransactions(); // Pour Solana
+            Autoload.fetchAndUpdateTransactions(); // Ethereum
+            Autoload.fetchAndUpdateSolanaTransactions(); // Solana
+            Autoload.fetchAndUpdateBnbTransactions(); // BNB Chain
             Autoload.rules()
             if(Autoload.app) {
-                // EthereumWallet.find().then(console.log)
                 Autoload.app.use(bearerToken())
                 Autoload.app.use(express.json())
                 Autoload.autoloadRoutesFromDirectory(path.join(__dirname, '../http'));

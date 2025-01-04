@@ -1,8 +1,8 @@
-// src/database/models/EtherTransaction.ts
+// src/database/models/BnbTransaction.ts
 
 import mongoose, { Document, Schema } from "mongoose";
 
-export interface EtherTransaction {
+export interface BnbTransaction {
     blockNumber: string;
     timeStamp: string;
     hash: string;
@@ -29,7 +29,7 @@ export interface EtherTransaction {
     tokenSymbol2: string;
 }
 
-const EtherTransactionSchema = new Schema({
+const BnbTransactionSchema = new Schema({
     blockNumber: String,
     timeStamp: String,
     hash: String,
@@ -56,4 +56,4 @@ const EtherTransactionSchema = new Schema({
     tokenSymbol2: String,
 });
 
-export default mongoose.model<Document & EtherTransaction>("EtherTransaction", EtherTransactionSchema);
+export default mongoose.model<Document & BnbTransaction>("BnbTransaction", BnbTransactionSchema);

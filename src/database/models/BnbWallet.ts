@@ -1,19 +1,19 @@
-// src/database/models/EtherWallet.ts
+// src/database/models/BnbWallet.ts
 
 import mongoose, {Document, Schema} from "mongoose";
 
-export interface EthereumWallet {
-    created_at: Date; 
-    balance: number; 
-    wallets: string[]; 
-    username: string; 
+export interface BnbWallet {
+    created_at: Date;
+    balance: number;
+    wallets: string[];
+    username: string;
     orderType: string;
     lastTransaction: Date;
 }
 
-export interface EthereumWalletDocument extends EthereumWallet, Document {}
+export interface BnbWalletDocument extends BnbWallet, Document {}
 
-const EthereumWalletSchema = new Schema({
+const BnbWalletSchema = new Schema({
     created_at: {
         type: Date,
         default: Date.now
@@ -31,7 +31,6 @@ const EthereumWalletSchema = new Schema({
         type: String,
         required: true
     },
-
     orderType: {
         type: String,
         required: false,
@@ -42,7 +41,6 @@ const EthereumWalletSchema = new Schema({
         required: false,
         default: null
     }
-
 });
 
-export default mongoose.model<EthereumWalletDocument>("EthereumWallet", EthereumWalletSchema);
+export default mongoose.model<BnbWalletDocument>("BnbWallet", BnbWalletSchema);

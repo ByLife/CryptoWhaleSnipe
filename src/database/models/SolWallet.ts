@@ -1,3 +1,5 @@
+// src/database/models/SolWallet.ts
+
 import mongoose, { Document, Schema } from "mongoose";
 
 export interface SolanaWallet {

@@ -1,3 +1,5 @@
+// src/database/models/AccessBearer.ts
+
 import mongoose, {Document, Schema} from "mongoose";
 
 export interface AccessBearer {
