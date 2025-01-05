@@ -23,6 +23,8 @@ export default {
                 if(typeof wallet !== "string") throw "Invalid parameters: wallets must be an array of strings"
             }
 
+            if(req.body.influencer && typeof req.body.influencer !== "boolean") throw "Invalid parameters: influencer must be a boolean"
+
             // Make wallets lowercase for ethereum and bnb
             const wallets = req.body.chain !== 'solana' 
                 ? req.body.wallets.map((wallet: string) => wallet.toLowerCase())
@@ -40,7 +42,8 @@ export default {
                     } else {
                         savedWallet = await new EthereumWallet({
                             username: req.body.username,
-                            wallets: wallets
+                            wallets: wallets,
+                            influencer: req.body.influencer
                         }).save();
                     }
                     break;
@@ -53,7 +56,8 @@ export default {
                     } else {
                         savedWallet = await new BnbWallet({
                             username: req.body.username,
-                            wallets: wallets
+                            wallets: wallets,
+                            influencer: req.body.influencer
                         }).save();
                     }
                     break;
@@ -66,7 +70,8 @@ export default {
                     } else {
                         savedWallet = await new SolanaWallet({
                             username: req.body.username,
-                            wallets: wallets
+                            wallets: wallets,
+                            influencer: req.body.influencer
                         }).save();
                     }
                     break;

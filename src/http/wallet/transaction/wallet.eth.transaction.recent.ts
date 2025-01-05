@@ -6,7 +6,7 @@ import EthereumWallet from '../../../database/models/EtherWallet';
 import AccessBearer from "../../../database/models/AccessBearer";
 
 export default {
-    name: "/wallet/transaction/recent",
+    name: "/wallet/eth/transaction/recent",
     description: "Get recent transactions",
     method: "GET",
     run: async (req: express.Request, res: express.Response) => {
@@ -45,6 +45,7 @@ export default {
                     value: tx.value,
                     type: tx.type,
                     tokenSymbol2: tx.tokenSymbol2,
+                    influencer: wallet.influencer
                 });
             }
 

@@ -1,11 +1,11 @@
 version: "3"
 services:
-  cryptosnipestaging_staging:
+  cryptosnipestaging_prod:
     build: . # build from Dockerfile in current directory
     ports: # map port 4000 on host to port 4000 in container
-      - "4000:4000"
+      - "4001:4000"
     environment: # set environment variables
-      - NODE_ENV=staging
+      - NODE_ENV=production
 networks:
   default:
     external:

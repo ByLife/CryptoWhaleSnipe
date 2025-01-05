@@ -37,7 +37,8 @@ export default {
                         blockTime: tx.blockTime,
                         swaps: tx.swaps,
                         totalUsdValue: totalUsdValue,
-                        type: tx.type
+                        type: tx.type,
+                        influencer: wallet.influencer
                     });
                 }
             }

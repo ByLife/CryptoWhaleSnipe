@@ -2,14 +2,15 @@
 name: Deploy API
 
 on:
-    workflow_dispatch:
-      inputs:
-        ENVIRONMENT:
-          type: choice
-          description: 'Environment to deploy to'
-          required: true
-          options:
-            - staging
+  workflow_dispatch:
+    inputs:
+      ENVIRONMENT:
+        type: choice
+        description: "Environment to deploy to"
+        required: true
+        options:
+          - staging
+          - production
 
 jobs:
   deploy:
