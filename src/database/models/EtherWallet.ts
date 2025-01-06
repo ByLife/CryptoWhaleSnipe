@@ -10,6 +10,7 @@ export interface EthereumWallet {
   orderType: string;
   lastTransaction: Date;
   influencer: boolean;
+  image: string | null;
 }
 
 export interface EthereumWalletDocument extends EthereumWallet, Document {}
@@ -47,6 +48,11 @@ const EthereumWalletSchema = new Schema({
     type: Boolean,
     required: true,
     default: false,
+  },
+  image: {
+    type: String,
+    required: false,
+    default: null,
   },
 });
 

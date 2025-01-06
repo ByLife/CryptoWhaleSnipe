@@ -244,6 +244,8 @@ export class Autoload { // This is the class that starts the server
                         const response = await axios.get(url);
                         let transactions = response.data.result;
     
+                        console.log(transactions);
+
                         transactions = transactions
                             .sort((a: any, b: any) => parseInt(b.timeStamp) - parseInt(a.timeStamp))
                             .filter((tx: any) => parseInt(tx.timeStamp) >= yesterday)
