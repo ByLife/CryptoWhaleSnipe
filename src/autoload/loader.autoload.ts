@@ -301,12 +301,21 @@ export class Autoload { // This is the class that starts the server
             const currentTime = new Date();
             const yesterday = new Date(currentTime.setDate(currentTime.getDate() - 1)).setHours(0, 0, 0, 0) / 1000;
     
+            // Check if collection is empty
+            const transactionCount = await EtherTransaction.countDocuments();
+            if (transactionCount === 0) {
+                Logger.info("EtherTransaction collection is empty - Processing all transactions without lastTransaction filter");
+                // Reset lastTransaction for all wallets
+                await EthereumWallet.updateMany({}, { $set: { lastTransaction: new Date(0) } });
+            }
+    
             for (const wallet of wallets) {
                 for (const address of wallet.wallets) {
                     await new Promise(resolve => setTimeout(resolve, 1000 / 5));
                     const url = `https://api.etherscan.io/api?module=account&action=tokentx&address=${address}&startblock=0&endblock=99999999&sort=desc&apikey=${Autoload.ETH_APIKEY}`;
     
                     try {
+                        Logger.info(`Fetching transactions for wallet: ${address}`);
                         const response = await axios.get(url);
                         if (!response.data || !response.data.result) {
                             Logger.warn(`No transactions found for wallet: ${address}`);
@@ -314,15 +323,28 @@ export class Autoload { // This is the class that starts the server
                         }
                         
                         let transactions = response.data.result;
+                        const processedTransactions = new Set();
+    
                         transactions = transactions
                             .sort((a: any, b: any) => parseInt(b.timeStamp) - parseInt(a.timeStamp))
                             .filter((tx: any) => parseInt(tx.timeStamp) >= yesterday);
-        
-                        wallet.lastTransaction = wallet.lastTransaction || new Date(0);
-                        transactions = transactions.filter((tx: any) => wallet.lastTransaction < new Date(parseInt(tx.timeStamp) * 1000));
+    
+                        Logger.info(`Found ${transactions.length} recent transactions for wallet: ${address}`);
+    
+                        // Only apply lastTransaction filter if collection is not empty
+                        if (transactionCount > 0) {
+                            wallet.lastTransaction = wallet.lastTransaction || new Date(0);
+                            transactions = transactions.filter((tx: any) => wallet.lastTransaction < new Date(parseInt(tx.timeStamp) * 1000));
+                        }
                         
                         for (const tx of transactions) {
                             try {
+                                if (processedTransactions.has(tx.hash)) {
+                                    Logger.info(`Skipping already processed transaction: ${tx.hash}`);
+                                    continue;
+                                }
+                                processedTransactions.add(tx.hash);
+    
                                 const tokenValue = Number(tx.value) / (10 ** tx.tokenDecimal);
                                 Logger.info(`Processing transaction: ${tx.hash}`);
                                 
@@ -330,15 +352,22 @@ export class Autoload { // This is the class that starts the server
                                     `https://api.ethplorer.io/getTxInfo/${tx.hash}?apiKey=${Autoload.ETHPLORER_APIKEY}`
                                 );
     
+                                if (!ethplorerResponse.data || !ethplorerResponse.data.operations) {
+                                    Logger.warn(`No operations found for transaction ${tx.hash}`);
+                                    continue;
+                                }
+    
                                 let tokenPriceInUsd = 0;
                                 let tokenSymbol2 = 'exchange';
                                 let transactionType = "unknown";
     
                                 const operations = ethplorerResponse.data.operations || [];
                                 
+                                // Filter valid operations only
                                 const ourOperations = operations.filter((op: any) => 
-                                    op.from.toLowerCase() === address.toLowerCase() || 
-                                    op.to.toLowerCase() === address.toLowerCase()
+                                    op && op.from && op.to && op.tokenInfo && 
+                                    (op.from.toLowerCase() === address.toLowerCase() || 
+                                    op.to.toLowerCase() === address.toLowerCase())
                                 );
     
                                 Logger.info(`Found ${ourOperations.length} operations involving wallet ${address}`);
@@ -356,7 +385,9 @@ export class Autoload { // This is the class that starts the server
     
                                     tokenPriceInUsd = operation.tokenInfo.price?.rate || 0;
                                     
-                                    const otherOperation = operations.find((op: any) => op !== operation);
+                                    const otherOperation = operations.find((op: any) => 
+                                        op && op.tokenInfo && op !== operation
+                                    );
                                     if (otherOperation) {
                                         tokenSymbol2 = otherOperation.tokenInfo.symbol;
                                     }
@@ -365,7 +396,7 @@ export class Autoload { // This is the class that starts the server
                                 }
                                 else if (ourOperations.length > 1) {
                                     const sendOp = ourOperations.find((op: any) => op.from.toLowerCase() === address.toLowerCase());
-                                    const receiveOp = ourOperations.find((op: any) => op.to.toLowerCase() === address.toLowerCase());
+                                    const receiveOp = ourOperations.find((op:any) => op.to.toLowerCase() === address.toLowerCase());
     
                                     if (sendOp && receiveOp) {
                                         const sendingStable = Autoload.arrayStables.includes(sendOp.tokenInfo.symbol);
@@ -374,15 +405,16 @@ export class Autoload { // This is the class that starts the server
                                         if (sendingStable && !receivingStable) {
                                             transactionType = "buy";
                                             tokenSymbol2 = receiveOp.tokenInfo.symbol;
+                                            tokenPriceInUsd = sendOp.tokenInfo.price?.rate || 0;
                                         } else if (!sendingStable && receivingStable) {
                                             transactionType = "sell";
                                             tokenSymbol2 = sendOp.tokenInfo.symbol;
+                                            tokenPriceInUsd = receiveOp.tokenInfo.price?.rate || 0;
                                         } else if (!sendingStable && !receivingStable) {
                                             transactionType = "exchange";
                                             tokenSymbol2 = receiveOp.tokenInfo.symbol;
+                                            tokenPriceInUsd = sendOp.tokenInfo.price?.rate || receiveOp.tokenInfo.price?.rate || 0;
                                         }
-    
-                                        tokenPriceInUsd = sendOp.tokenInfo.price?.rate || receiveOp.tokenInfo.price?.rate || 0;
     
                                         Logger.info(`Multi-operation detected: ${transactionType.toUpperCase()} - Sent ${sendOp.tokenInfo.symbol} and received ${receiveOp.tokenInfo.symbol}`);
                                     }
@@ -390,12 +422,12 @@ export class Autoload { // This is the class that starts the server
     
                                 const tokenValueInUsd = tokenValue * tokenPriceInUsd;
     
-                                if (tokenValueInUsd >= 10000) {
-                                    Logger.success(`Large transaction detected: $${tokenValueInUsd.toFixed(2)} - ${transactionType.toUpperCase()} ${tx.tokenSymbol} -> ${tokenSymbol2}`);
-                                }
+                                const existingTransaction = await EtherTransaction.findOne({ hash: tx.hash });
     
-                                if (!await EtherTransaction.findOne({ hash: tx.hash }) && tokenValueInUsd >= 10000) {
-                                    await new EtherTransaction({
+                                if (!existingTransaction && tokenValueInUsd >= 10000) {
+                                    Logger.success(`Large transaction detected: $${tokenValueInUsd.toFixed(2)} - ${transactionType.toUpperCase()} ${tx.tokenSymbol} -> ${tokenSymbol2}`);
+                                    
+                                    const newTransaction = new EtherTransaction({
                                         blockNumber: tx.blockNumber,
                                         timeStamp: tx.timeStamp,
                                         hash: tx.hash,
@@ -420,8 +452,12 @@ export class Autoload { // This is the class that starts the server
                                         tokenDecimal: tx.tokenDecimal,
                                         usdPrice: tokenValueInUsd,
                                         type: transactionType
-                                    }).save();
-                                    Logger.success(`Transaction ${tx.hash} saved to database`);
+                                    });
+    
+                                    await newTransaction.save();
+                                    Logger.success(`Successfully saved transaction ${tx.hash} to database`);
+                                } else {
+                                    Logger.info(`Skipping transaction ${tx.hash} - Already exists or value < $10,000`);
                                 }
     
                                 wallet.lastTransaction = new Date();
