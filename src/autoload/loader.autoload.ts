@@ -296,6 +296,8 @@ export class Autoload { // This is the class that starts the server
     private static async fetchAndUpdateTransactions() {
         try {
             const wallets = await EthereumWallet.find();
+            Logger.info("Starting to fetch ETH transactions for all wallets...");
+            
             const currentTime = new Date();
             const yesterday = new Date(currentTime.setDate(currentTime.getDate() - 1)).setHours(0, 0, 0, 0) / 1000;
     
@@ -306,19 +308,23 @@ export class Autoload { // This is the class that starts the server
     
                     try {
                         const response = await axios.get(url);
-                        if (!response.data || !response.data.result) continue;
+                        if (!response.data || !response.data.result) {
+                            Logger.warn(`No transactions found for wallet: ${address}`);
+                            continue;
+                        }
                         
                         let transactions = response.data.result;
                         transactions = transactions
                             .sort((a: any, b: any) => parseInt(b.timeStamp) - parseInt(a.timeStamp))
                             .filter((tx: any) => parseInt(tx.timeStamp) >= yesterday);
-    
+        
                         wallet.lastTransaction = wallet.lastTransaction || new Date(0);
                         transactions = transactions.filter((tx: any) => wallet.lastTransaction < new Date(parseInt(tx.timeStamp) * 1000));
                         
                         for (const tx of transactions) {
                             try {
                                 const tokenValue = Number(tx.value) / (10 ** tx.tokenDecimal);
+                                Logger.info(`Processing transaction: ${tx.hash}`);
                                 
                                 const ethplorerResponse = await axios.get(
                                     `https://api.ethplorer.io/getTxInfo/${tx.hash}?apiKey=${Autoload.ETHPLORER_APIKEY}`
@@ -330,13 +336,13 @@ export class Autoload { // This is the class that starts the server
     
                                 const operations = ethplorerResponse.data.operations || [];
                                 
-                                // Trouver toutes les opérations impliquant notre adresse
                                 const ourOperations = operations.filter((op: any) => 
                                     op.from.toLowerCase() === address.toLowerCase() || 
                                     op.to.toLowerCase() === address.toLowerCase()
                                 );
     
-                                // Si nous n'avons qu'une seule opération
+                                Logger.info(`Found ${ourOperations.length} operations involving wallet ${address}`);
+    
                                 if (ourOperations.length === 1) {
                                     const operation = ourOperations[0];
                                     const isReceiving = operation.to.toLowerCase() === address.toLowerCase();
@@ -350,15 +356,14 @@ export class Autoload { // This is the class that starts the server
     
                                     tokenPriceInUsd = operation.tokenInfo.price?.rate || 0;
                                     
-                                    // Chercher dans les autres opérations pour trouver le token2
                                     const otherOperation = operations.find((op: any) => op !== operation);
                                     if (otherOperation) {
                                         tokenSymbol2 = otherOperation.tokenInfo.symbol;
                                     }
+    
+                                    Logger.info(`Single operation detected: ${transactionType.toUpperCase()} - ${operation.tokenInfo.symbol} ${isReceiving ? 'received' : 'sent'}`);
                                 }
-                                // Si nous avons plusieurs opérations (multi-hop trades)
                                 else if (ourOperations.length > 1) {
-                                    // Trouver l'opération initiale (ce qu'on envoie) et finale (ce qu'on reçoit)
                                     const sendOp = ourOperations.find((op: any) => op.from.toLowerCase() === address.toLowerCase());
                                     const receiveOp = ourOperations.find((op: any) => op.to.toLowerCase() === address.toLowerCase());
     
@@ -373,16 +378,21 @@ export class Autoload { // This is the class that starts the server
                                             transactionType = "sell";
                                             tokenSymbol2 = sendOp.tokenInfo.symbol;
                                         } else if (!sendingStable && !receivingStable) {
-                                            // Si on échange un token contre un autre (pas de stable)
                                             transactionType = "exchange";
                                             tokenSymbol2 = receiveOp.tokenInfo.symbol;
                                         }
     
                                         tokenPriceInUsd = sendOp.tokenInfo.price?.rate || receiveOp.tokenInfo.price?.rate || 0;
+    
+                                        Logger.info(`Multi-operation detected: ${transactionType.toUpperCase()} - Sent ${sendOp.tokenInfo.symbol} and received ${receiveOp.tokenInfo.symbol}`);
                                     }
                                 }
     
                                 const tokenValueInUsd = tokenValue * tokenPriceInUsd;
+    
+                                if (tokenValueInUsd >= 10000) {
+                                    Logger.success(`Large transaction detected: $${tokenValueInUsd.toFixed(2)} - ${transactionType.toUpperCase()} ${tx.tokenSymbol} -> ${tokenSymbol2}`);
+                                }
     
                                 if (!await EtherTransaction.findOne({ hash: tx.hash }) && tokenValueInUsd >= 10000) {
                                     await new EtherTransaction({
@@ -411,6 +421,7 @@ export class Autoload { // This is the class that starts the server
                                         usdPrice: tokenValueInUsd,
                                         type: transactionType
                                     }).save();
+                                    Logger.success(`Transaction ${tx.hash} saved to database`);
                                 }
     
                                 wallet.lastTransaction = new Date();
@@ -426,6 +437,7 @@ export class Autoload { // This is the class that starts the server
                     }
                 }
             }
+            Logger.success("Finished processing all ETH transactions");
         } catch (error) {
             Logger.error(`Failed to fetch transactions: ${error}`);
         }
