@@ -319,24 +319,72 @@ export class Autoload { // This is the class that starts the server
                         for (const tx of transactions) {
                             try {
                                 const tokenValue = Number(tx.value) / (10 ** tx.tokenDecimal);
-                                let res = await Autoload.getTokenPriceAndSymbol(tx.hash, tx.tokenSymbol, address);
-                                const tokenPriceInUsd = res.price;
-                                const tokenSymbol2 = res.symbol;
-                                const tokenValueInUsd = tokenValue * tokenPriceInUsd;
+                                
+                                const ethplorerResponse = await axios.get(
+                                    `https://api.ethplorer.io/getTxInfo/${tx.hash}?apiKey=${Autoload.ETHPLORER_APIKEY}`
+                                );
     
-                                if (!await EtherTransaction.findOne({ hash: tx.hash }) && tokenValueInUsd >= 10000) {
-                                    // Determine transaction type based on the wallet's role
-                                    const isReceiving = tx.to.toLowerCase() === address.toLowerCase();
-                                    let transactionType = "unknown";
-                                    
-                                    if (Autoload.arrayStables.includes(tx.tokenSymbol)) {
-                                        // For stablecoins, receiving is sell (got USDT) and sending is buy (spent USDT)
+                                let tokenPriceInUsd = 0;
+                                let tokenSymbol2 = 'exchange';
+                                let transactionType = "unknown";
+    
+                                const operations = ethplorerResponse.data.operations || [];
+                                
+                                // Trouver toutes les opérations impliquant notre adresse
+                                const ourOperations = operations.filter((op: any) => 
+                                    op.from.toLowerCase() === address.toLowerCase() || 
+                                    op.to.toLowerCase() === address.toLowerCase()
+                                );
+    
+                                // Si nous n'avons qu'une seule opération
+                                if (ourOperations.length === 1) {
+                                    const operation = ourOperations[0];
+                                    const isReceiving = operation.to.toLowerCase() === address.toLowerCase();
+                                    const isStable = Autoload.arrayStables.includes(operation.tokenInfo.symbol);
+    
+                                    if (isStable) {
                                         transactionType = isReceiving ? "sell" : "buy";
                                     } else {
-                                        // For non-stablecoins, receiving is buy (got tokens) and sending is sell (sold tokens)
                                         transactionType = isReceiving ? "buy" : "sell";
                                     }
     
+                                    tokenPriceInUsd = operation.tokenInfo.price?.rate || 0;
+                                    
+                                    // Chercher dans les autres opérations pour trouver le token2
+                                    const otherOperation = operations.find((op: any) => op !== operation);
+                                    if (otherOperation) {
+                                        tokenSymbol2 = otherOperation.tokenInfo.symbol;
+                                    }
+                                }
+                                // Si nous avons plusieurs opérations (multi-hop trades)
+                                else if (ourOperations.length > 1) {
+                                    // Trouver l'opération initiale (ce qu'on envoie) et finale (ce qu'on reçoit)
+                                    const sendOp = ourOperations.find((op: any) => op.from.toLowerCase() === address.toLowerCase());
+                                    const receiveOp = ourOperations.find((op: any) => op.to.toLowerCase() === address.toLowerCase());
+    
+                                    if (sendOp && receiveOp) {
+                                        const sendingStable = Autoload.arrayStables.includes(sendOp.tokenInfo.symbol);
+                                        const receivingStable = Autoload.arrayStables.includes(receiveOp.tokenInfo.symbol);
+    
+                                        if (sendingStable && !receivingStable) {
+                                            transactionType = "buy";
+                                            tokenSymbol2 = receiveOp.tokenInfo.symbol;
+                                        } else if (!sendingStable && receivingStable) {
+                                            transactionType = "sell";
+                                            tokenSymbol2 = sendOp.tokenInfo.symbol;
+                                        } else if (!sendingStable && !receivingStable) {
+                                            // Si on échange un token contre un autre (pas de stable)
+                                            transactionType = "exchange";
+                                            tokenSymbol2 = receiveOp.tokenInfo.symbol;
+                                        }
+    
+                                        tokenPriceInUsd = sendOp.tokenInfo.price?.rate || receiveOp.tokenInfo.price?.rate || 0;
+                                    }
+                                }
+    
+                                const tokenValueInUsd = tokenValue * tokenPriceInUsd;
+    
+                                if (!await EtherTransaction.findOne({ hash: tx.hash }) && tokenValueInUsd >= 10000) {
                                     await new EtherTransaction({
                                         blockNumber: tx.blockNumber,
                                         timeStamp: tx.timeStamp,
