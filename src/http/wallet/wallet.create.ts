@@ -32,6 +32,7 @@ export default {
 
             let wallet;
             let savedWallet;
+            let image = req.body.image ? req.body.image : null;
 
             switch(req.body.chain) {
                 case 'ethereum':
@@ -43,7 +44,8 @@ export default {
                         savedWallet = await new EthereumWallet({
                             username: req.body.username,
                             wallets: wallets,
-                            influencer: req.body.influencer
+                            influencer: req.body.influencer,
+                            image
                         }).save();
                     }
                     break;
@@ -57,7 +59,8 @@ export default {
                         savedWallet = await new BnbWallet({
                             username: req.body.username,
                             wallets: wallets,
-                            influencer: req.body.influencer
+                            influencer: req.body.influencer,
+                            image
                         }).save();
                     }
                     break;
@@ -71,7 +74,8 @@ export default {
                         savedWallet = await new SolanaWallet({
                             username: req.body.username,
                             wallets: wallets,
-                            influencer: req.body.influencer
+                            influencer: req.body.influencer,
+                            image
                         }).save();
                     }
                     break;
