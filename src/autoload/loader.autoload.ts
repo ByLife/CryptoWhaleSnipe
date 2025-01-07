@@ -315,7 +315,6 @@ export class Autoload { // This is the class that starts the server
                     const url = `https://api.etherscan.io/api?module=account&action=tokentx&address=${address}&startblock=0&endblock=99999999&sort=desc&apikey=${Autoload.ETH_APIKEY}`;
     
                     try {
-                        Logger.info(`Fetching transactions for wallet: ${address}`);
                         const response = await axios.get(url);
                         if (!response.data || !response.data.result) {
                             Logger.warn(`No transactions found for wallet: ${address}`);
@@ -328,9 +327,7 @@ export class Autoload { // This is the class that starts the server
                         transactions = transactions
                             .sort((a: any, b: any) => parseInt(b.timeStamp) - parseInt(a.timeStamp))
                             .filter((tx: any) => parseInt(tx.timeStamp) >= yesterday);
-    
-                        Logger.info(`Found ${transactions.length} recent transactions for wallet: ${address}`);
-    
+        
                         // Only apply lastTransaction filter if collection is not empty
                         if (transactionCount > 0) {
                             wallet.lastTransaction = wallet.lastTransaction || new Date(0);
@@ -373,6 +370,7 @@ export class Autoload { // This is the class that starts the server
                                 Logger.info(`Found ${ourOperations.length} operations involving wallet ${address}`);
     
                                 if (ourOperations.length === 1) {
+                                    console.log(ourOperations);
                                     const operation = ourOperations[0];
                                     const isReceiving = operation.to.toLowerCase() === address.toLowerCase();
                                     const isStable = Autoload.arrayStables.includes(operation.tokenInfo.symbol);
@@ -395,6 +393,7 @@ export class Autoload { // This is the class that starts the server
                                     Logger.info(`Single operation detected: ${transactionType.toUpperCase()} - ${operation.tokenInfo.symbol} ${isReceiving ? 'received' : 'sent'}`);
                                 }
                                 else if (ourOperations.length > 1) {
+                                    console.log(ourOperations);
                                     const sendOp = ourOperations.find((op: any) => op.from.toLowerCase() === address.toLowerCase());
                                     const receiveOp = ourOperations.find((op:any) => op.to.toLowerCase() === address.toLowerCase());
     
@@ -425,6 +424,7 @@ export class Autoload { // This is the class that starts the server
                                 const existingTransaction = await EtherTransaction.findOne({ hash: tx.hash });
     
                                 if (!existingTransaction && tokenValueInUsd >= 10000) {
+                                    console.log(tx);
                                     Logger.success(`Large transaction detected: $${tokenValueInUsd.toFixed(2)} - ${transactionType.toUpperCase()} ${tx.tokenSymbol} -> ${tokenSymbol2}`);
                                     
                                     const newTransaction = new EtherTransaction({
@@ -459,6 +459,8 @@ export class Autoload { // This is the class that starts the server
                                 } else {
                                     Logger.info(`Skipping transaction ${tx.hash} - Already exists or value < $10,000`);
                                 }
+
+
     
                                 wallet.lastTransaction = new Date();
                                 await wallet.save();
