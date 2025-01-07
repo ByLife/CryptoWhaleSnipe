@@ -37,5 +37,5 @@ jobs:
             git pull
             docker stop cryptowhalesnipe_${{ github.event.inputs.ENVIRONMENT }} || echo "No container running, building new one"
             docker rm cryptowhalesnipe_${{ github.event.inputs.ENVIRONMENT }} || echo "No container running, building new one"
-            docker rmi cryptowhalesnipe_${{ github.event.inputs.ENVIRONMENT }} || echo "No image found, building new one"
+            docker rmi cryptowhalesnipe_cryptowhalesnipe${{ github.event.inputs.ENVIRONMENT }} || echo "No image found, building new one"
             docker-compose -f docker-compose-${{ github.event.inputs.ENVIRONMENT }}.yml up -d --build
