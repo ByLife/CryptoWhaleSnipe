@@ -323,6 +323,18 @@ export class Autoload { // This is the class that starts the server
                         
                         let transactions = response.data.result;
                         const processedTransactions = new Set();
+
+
+                        // debug ici
+                        if(transactions.length > 0) {
+                            const firstTokenSymbol = transactions[0].tokenSymbol;
+                            const lastTokenSymbol = transactions[transactions.length - 1].tokenSymbol;
+                            if(firstTokenSymbol === lastTokenSymbol) {
+                                Logger.warn(`First and last token symbol are the same: ${firstTokenSymbol}`);
+                                continue;
+                            }
+                        }
+                            
     
                         transactions = transactions
                             .sort((a: any, b: any) => parseInt(b.timeStamp) - parseInt(a.timeStamp))
