@@ -243,8 +243,6 @@ export class Autoload { // This is the class that starts the server
                     try {
                         const response = await axios.get(url);
                         let transactions = response.data.result;
-    
-                        console.log(transactions);
 
                         transactions = transactions
                             .sort((a: any, b: any) => parseInt(b.timeStamp) - parseInt(a.timeStamp))
@@ -323,18 +321,6 @@ export class Autoload { // This is the class that starts the server
                         
                         let transactions = response.data.result;
                         const processedTransactions = new Set();
-
-
-                        // debug ici
-                        if(transactions.length > 0) {
-                            const firstTokenSymbol = transactions[0].tokenSymbol;
-                            const lastTokenSymbol = transactions[transactions.length - 1].tokenSymbol;
-                            if(firstTokenSymbol === lastTokenSymbol) {
-                                Logger.warn(`First and last token symbol are the same: ${firstTokenSymbol}`);
-                                continue;
-                            }
-                        }
-                            
     
                         transactions = transactions
                             .sort((a: any, b: any) => parseInt(b.timeStamp) - parseInt(a.timeStamp))
@@ -382,7 +368,6 @@ export class Autoload { // This is the class that starts the server
                                 Logger.info(`Found ${ourOperations.length} operations involving wallet ${address}`);
     
                                 if (ourOperations.length === 1) {
-                                    console.log(ourOperations);
                                     const operation = ourOperations[0];
                                     const isReceiving = operation.to.toLowerCase() === address.toLowerCase();
                                     const isStable = Autoload.arrayStables.includes(operation.tokenInfo.symbol);
@@ -405,7 +390,6 @@ export class Autoload { // This is the class that starts the server
                                     Logger.info(`Single operation detected: ${transactionType.toUpperCase()} - ${operation.tokenInfo.symbol} ${isReceiving ? 'received' : 'sent'}`);
                                 }
                                 else if (ourOperations.length > 1) {
-                                    console.log(ourOperations);
                                     const sendOp = ourOperations.find((op: any) => op.from.toLowerCase() === address.toLowerCase());
                                     const receiveOp = ourOperations.find((op:any) => op.to.toLowerCase() === address.toLowerCase());
     
@@ -435,10 +419,16 @@ export class Autoload { // This is the class that starts the server
     
                                 const existingTransaction = await EtherTransaction.findOne({ hash: tx.hash });
     
-                                if (!existingTransaction && tokenValueInUsd >= 10000) {
-                                    console.log(tx);
+                                if (!existingTransaction && tokenValueInUsd >= 10000 && tokenValueInUsd <= 5000000) {
                                     Logger.success(`Large transaction detected: $${tokenValueInUsd.toFixed(2)} - ${transactionType.toUpperCase()} ${tx.tokenSymbol} -> ${tokenSymbol2}`);
-                                    
+
+
+
+                                    if(tokenSymbol2 === tx.tokenSymbol) {
+                                        Logger.warn(`First and last token symbol are the same: ${tokenSymbol2}`);
+                                        tokenSymbol2 = 'USDT';
+                                    }
+                                
                                     const newTransaction = new EtherTransaction({
                                         blockNumber: tx.blockNumber,
                                         timeStamp: tx.timeStamp,

@@ -11,6 +11,7 @@ export interface EthereumWallet {
   lastTransaction: Date;
   influencer: boolean;
   image: string | null;
+  nickname: string;
 }
 
 export interface EthereumWalletDocument extends EthereumWallet, Document {}
@@ -50,6 +51,11 @@ const EthereumWalletSchema = new Schema({
     default: false,
   },
   image: {
+    type: String,
+    required: false,
+    default: null,
+  },
+  nickname: {
     type: String,
     required: false,
     default: null,
