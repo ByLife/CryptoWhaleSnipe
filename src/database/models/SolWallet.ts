@@ -10,6 +10,7 @@ export interface SolanaWallet {
   lastTransaction: Date;
   influencer: boolean;
   image: string | null;
+  nickname: string;
 }
 
 export interface SolanaWalletDocument extends SolanaWallet, Document {}
@@ -46,6 +47,10 @@ const SolanaWalletSchema = new Schema({
     type: String,
     required: false,
     default: null,
+  },
+  nickname: {
+    type: String,
+    required: false,
   },
 });
 

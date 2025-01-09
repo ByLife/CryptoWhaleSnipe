@@ -38,7 +38,9 @@ export default {
                         swaps: tx.swaps,
                         totalUsdValue: totalUsdValue,
                         type: tx.type,
-                        influencer: wallet.influencer
+                        influencer: wallet.influencer,
+                        image: wallet.image,
+                        nickname: wallet.nickname
                     });
                 }
             }

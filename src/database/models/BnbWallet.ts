@@ -11,6 +11,7 @@ export interface BnbWallet {
   lastTransaction: Date;
   influencer: boolean;
   image: string | null;
+  nickname: string;
 }
 
 export interface BnbWalletDocument extends BnbWallet, Document {}
@@ -52,6 +53,10 @@ const BnbWalletSchema = new Schema({
     type: String,
     required: false,
     default: null,
+  },
+  nickname: {
+    type: String,
+    required: false,
   },
 });
 

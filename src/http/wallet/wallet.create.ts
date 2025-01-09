@@ -33,6 +33,7 @@ export default {
             let wallet;
             let savedWallet;
             let image = req.body.image ? req.body.image : null;
+            let nickname = req.body.nickname ? req.body.nickname : null;
 
             switch(req.body.chain) {
                 case 'ethereum':
@@ -45,7 +46,8 @@ export default {
                             username: req.body.username,
                             wallets: wallets,
                             influencer: req.body.influencer,
-                            image
+                            image,
+                            nickname
                         }).save();
                     }
                     break;
@@ -60,7 +62,8 @@ export default {
                             username: req.body.username,
                             wallets: wallets,
                             influencer: req.body.influencer,
-                            image
+                            image,
+                            nickname
                         }).save();
                     }
                     break;
@@ -75,7 +78,8 @@ export default {
                             username: req.body.username,
                             wallets: wallets,
                             influencer: req.body.influencer,
-                            image
+                            image,
+                            nickname
                         }).save();
                     }
                     break;

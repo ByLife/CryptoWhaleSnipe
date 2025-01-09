@@ -40,7 +40,9 @@ export default {
                     value: tx.value,
                     type: tx.type,
                     tokenSymbol2: tx.tokenSymbol2,
-                    influencer: wallet.influencer
+                    influencer: wallet.influencer,
+                    image: wallet.image,
+                    nickname: wallet.nickname
                 });
             }
 

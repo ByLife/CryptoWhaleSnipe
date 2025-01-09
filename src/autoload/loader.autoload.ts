@@ -196,7 +196,7 @@ export class Autoload { // This is the class that starts the server
                                     const preBalance = preTokenBalances.find((pre: { mint: any; }) => pre.mint === postBalance.mint);
                                     if (preBalance) {
                                         const amountChange = postBalance.uiTokenAmount.uiAmount - preBalance.uiTokenAmount.uiAmount;
-                                        const tokenSymbol = postBalance.uiTokenAmount.tokenSymbol || 'Unknown Token';
+                                        const tokenSymbol = postBalance.uiTokenAmount.tokenSymbol || 'EXCHANGE';
     
                                         swaps.push({
                                             tokenSymbol: tokenSymbol,
@@ -243,8 +243,6 @@ export class Autoload { // This is the class that starts the server
                     try {
                         const response = await axios.get(url);
                         let transactions = response.data.result;
-    
-                        console.log(transactions);
 
                         transactions = transactions
                             .sort((a: any, b: any) => parseInt(b.timeStamp) - parseInt(a.timeStamp))
@@ -294,96 +292,133 @@ export class Autoload { // This is the class that starts the server
     
 
     private static async fetchAndUpdateTransactions() {
-        try {
-            const wallets = await EthereumWallet.find();
-            const currentTime = new Date();
-            const yesterday = new Date(currentTime.setDate(currentTime.getDate() - 1)).setHours(0, 0, 0, 0) / 1000;
+        const processTransactions = async () => {
+            try {
+                const wallets = await EthereumWallet.find();
+                const currentTime = new Date();
+                const yesterday = new Date(currentTime.setDate(currentTime.getDate() - 1)).setHours(0, 0, 0, 0) / 1000;
     
-            for (const wallet of wallets) {
-                for (const address of wallet.wallets) {
-                    await new Promise(resolve => setTimeout(resolve, 1000 / 5));
-                    const url = `https://api.etherscan.io/api?module=account&action=tokentx&address=${address}&startblock=0&endblock=99999999&sort=desc&apikey=${Autoload.ETH_APIKEY}`;
+                const transactionCount = await EtherTransaction.countDocuments();
+                if (transactionCount === 0) {
+                    await EthereumWallet.updateMany({}, { $set: { lastTransaction: new Date(0) } });
+                }
     
-                    try {
-                        const response = await axios.get(url);
-                        if (!response.data || !response.data.result) continue;
-                        
-                        let transactions = response.data.result;
-                        transactions = transactions
-                            .sort((a: any, b: any) => parseInt(b.timeStamp) - parseInt(a.timeStamp))
-                            .filter((tx: any) => parseInt(tx.timeStamp) >= yesterday);
+                for (const wallet of wallets) {
+                    for (const address of wallet.wallets) {
+                        await new Promise(resolve => setTimeout(resolve, 1000 / 5));
+                        const url = `https://api.etherscan.io/api?module=account&action=tokentx&address=${address}&startblock=0&endblock=99999999&sort=desc&apikey=${Autoload.ETH_APIKEY}`;
     
-                        wallet.lastTransaction = wallet.lastTransaction || new Date(0);
-                        transactions = transactions.filter((tx: any) => wallet.lastTransaction < new Date(parseInt(tx.timeStamp) * 1000));
-                        
-                        for (const tx of transactions) {
-                            try {
-                                const tokenValue = Number(tx.value) / (10 ** tx.tokenDecimal);
-                                let res = await Autoload.getTokenPriceAndSymbol(tx.hash, tx.tokenSymbol, address);
-                                const tokenPriceInUsd = res.price;
-                                const tokenSymbol2 = res.symbol;
-                                const tokenValueInUsd = tokenValue * tokenPriceInUsd;
+                        try {
+                            const response = await axios.get(url);
+                            if (!response.data?.result) continue;
+                            
+                            let transactions = response.data.result
+                                .filter((tx: any) => parseInt(tx.timeStamp) >= yesterday)
+                                .filter((tx: any) => !transactionCount || wallet.lastTransaction < new Date(parseInt(tx.timeStamp) * 1000));
     
-                                if (!await EtherTransaction.findOne({ hash: tx.hash }) && tokenValueInUsd >= 10000) {
-                                    // Determine transaction type based on the wallet's role
-                                    const isReceiving = tx.to.toLowerCase() === address.toLowerCase();
-                                    let transactionType = "unknown";
+                            const processedTxs = new Set();
+                            
+                            for (const tx of transactions) {
+                                try {
+                                    if (processedTxs.has(tx.hash)) continue;
+                                    processedTxs.add(tx.hash);
+    
+                                    const ethplorerResponse = await axios.get(
+                                        `https://api.ethplorer.io/getTxInfo/${tx.hash}?apiKey=${Autoload.ETHPLORER_APIKEY}`
+                                    );
+    
+                                    if (!ethplorerResponse.data?.operations) continue;
+    
+                                    const operations = ethplorerResponse.data.operations;
                                     
-                                    if (Autoload.arrayStables.includes(tx.tokenSymbol)) {
-                                        // For stablecoins, receiving is sell (got USDT) and sending is buy (spent USDT)
-                                        transactionType = isReceiving ? "sell" : "buy";
+                                    // Get all operations involving our address
+                                    const ourOps = operations.filter((op: any) => 
+                                        op?.from?.toLowerCase() === address.toLowerCase() || 
+                                        op?.to?.toLowerCase() === address.toLowerCase()
+                                    );
+    
+                                    if (ourOps.length < 2) continue;
+    
+                                    const outgoingOp = ourOps.find((op:any) => op.from.toLowerCase() === address.toLowerCase());
+                                    const incomingOp = ourOps.find((op:any) => op.to.toLowerCase() === address.toLowerCase());
+    
+                                    if (!outgoingOp || !incomingOp) continue;
+    
+                                    const outValue = Number(outgoingOp.value) * (outgoingOp.tokenInfo?.price?.rate || 0);
+                                    const inValue = Number(incomingOp.value) * (incomingOp.tokenInfo?.price?.rate || 0);
+                                    
+                                    let mainOp, otherOp, type;
+                                    if (outValue > inValue) {
+                                        mainOp = outgoingOp;
+                                        otherOp = incomingOp;
+                                        type = "sell";
                                     } else {
-                                        // For non-stablecoins, receiving is buy (got tokens) and sending is sell (sold tokens)
-                                        transactionType = isReceiving ? "buy" : "sell";
+                                        mainOp = incomingOp;
+                                        otherOp = outgoingOp;
+                                        type = "buy";
                                     }
     
-                                    await new EtherTransaction({
+                                    const tokenValue = Number(mainOp.value) / (10 ** mainOp.tokenInfo.decimals);
+                                    const tokenValueInUsd = tokenValue * (mainOp.tokenInfo.price?.rate || 0);
+    
+                                    if (await EtherTransaction.findOne({ hash: tx.hash }) || 
+                                        tokenValueInUsd < 10000 || tokenValueInUsd > 5000000) continue;
+    
+                                    const newTransaction = new EtherTransaction({
                                         blockNumber: tx.blockNumber,
                                         timeStamp: tx.timeStamp,
                                         hash: tx.hash,
                                         nonce: tx.nonce,
                                         transactionIndex: tx.transactionIndex,
-                                        from: tx.from,
-                                        to: tx.to,
+                                        from: mainOp.from,
+                                        to: mainOp.to,
                                         value: tokenValueInUsd,
                                         gas: tx.gas,
                                         gasPrice: tx.gasPrice,
                                         isError: tx.isError,
-                                        input: tx.input,
-                                        contractAddress: tx.contractAddress,
+                                        input: "deprecated",
+                                        contractAddress: mainOp.tokenInfo.address,
                                         cumulativeGasUsed: tx.cumulativeGasUsed,
                                         gasUsed: tx.gasUsed,
                                         confirmations: tx.confirmations,
                                         methodId: tx.methodId,
                                         functionName: tx.functionName,
-                                        tokenName: tx.tokenName,
-                                        tokenSymbol: tx.tokenSymbol,
-                                        tokenSymbol2: tokenSymbol2,
-                                        tokenDecimal: tx.tokenDecimal,
+                                        tokenName: mainOp.tokenInfo.name,
+                                        tokenSymbol: mainOp.tokenInfo.symbol,
+                                        tokenSymbol2: otherOp.tokenInfo.symbol,
+                                        tokenDecimal: mainOp.tokenInfo.decimals,
                                         usdPrice: tokenValueInUsd,
-                                        type: transactionType
-                                    }).save();
-                                }
+                                        type: type
+                                    });
     
-                                wallet.lastTransaction = new Date();
-                                await wallet.save();
-                            } catch (txError) {
-                                Logger.error(`Error processing transaction ${tx.hash}: ${txError}`);
-                                continue;
+                                    await newTransaction.save();
+                                    Logger.success(`Saved ${type} transaction ${tx.hash}: ${mainOp.tokenInfo.symbol} -> ${otherOp.tokenInfo.symbol}`);
+    
+                                    wallet.lastTransaction = new Date();
+                                    await wallet.save();
+                                } catch (error) {
+                                    Logger.error(`TX Error ${tx.hash}: ${error}`);
+                                }
                             }
+                        } catch (error) {
+                            Logger.error(`Wallet Error ${address}: ${error}`);
                         }
-                    } catch (walletError) {
-                        Logger.error(`Error fetching transactions for wallet ${address}: ${walletError}`);
-                        continue;
                     }
                 }
+            } catch (error) {
+                Logger.error(`Fetch Error: ${error}`);
             }
-        } catch (error) {
-            Logger.error(`Failed to fetch transactions: ${error}`);
-        }
-        setTimeout(Autoload.fetchAndUpdateTransactions, 5000);
-    }
+        };
     
+        // Initial call
+        await processTransactions();
+        
+        // Schedule next run
+        setTimeout(() => {
+            Autoload.fetchAndUpdateTransactions();
+        }, 5000);
+    }
+
     
     protected static async getTokenPriceAndSymbol(hash: string, tokenSymbol: string, walletAddress: string) {
         // delay to keep under 10 req/s
