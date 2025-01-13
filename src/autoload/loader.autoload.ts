@@ -361,9 +361,10 @@ export class Autoload { // This is the class that starts the server
                                     const tokenValue = Number(mainOp.value) / (10 ** mainOp.tokenInfo.decimals);
                                     const tokenValueInUsd = tokenValue * (mainOp.tokenInfo.price?.rate || 0);
     
-                                    if (await EtherTransaction.findOne({ hash: tx.hash }) || 
-                                        tokenValueInUsd < 8000 || tokenValueInUsd > 5000000) continue;
-    
+                                     if (await EtherTransaction.findOne({ hash: tx.hash }) || 
+                                         tokenValueInUsd < 8000 || tokenValueInUsd > 5000000) continue;
+                                        
+                                    
                                     const newTransaction = new EtherTransaction({
                                         blockNumber: tx.blockNumber,
                                         timeStamp: tx.timeStamp,
@@ -388,10 +389,12 @@ export class Autoload { // This is the class that starts the server
                                         tokenSymbol2: otherOp.tokenInfo.symbol,
                                         tokenDecimal: mainOp.tokenInfo.decimals,
                                         usdPrice: tokenValueInUsd,
-                                        type: type
+                                        type: type,
+                                        marketCap: mainOp.tokenInfo.price?.marketCapUsd || 0
                                     });
     
                                     await newTransaction.save();
+
                                     Logger.success(`Saved ${type} transaction ${tx.hash}: ${mainOp.tokenInfo.symbol} -> ${otherOp.tokenInfo.symbol}`);
     
                                     wallet.lastTransaction = new Date();
