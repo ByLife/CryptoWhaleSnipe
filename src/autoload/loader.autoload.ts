@@ -416,7 +416,7 @@ export class Autoload { // This is the class that starts the server
         // Schedule next run
         setTimeout(() => {
             Autoload.fetchAndUpdateTransactions();
-        }, 5000);
+        }, 100);
     }
 
     
