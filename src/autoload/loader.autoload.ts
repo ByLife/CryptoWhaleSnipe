@@ -362,7 +362,7 @@ export class Autoload { // This is the class that starts the server
                                     const tokenValueInUsd = tokenValue * (mainOp.tokenInfo.price?.rate || 0);
     
                                     if (await EtherTransaction.findOne({ hash: tx.hash }) || 
-                                        tokenValueInUsd < 10000 || tokenValueInUsd > 5000000) continue;
+                                        tokenValueInUsd < 8000 || tokenValueInUsd > 5000000) continue;
     
                                     const newTransaction = new EtherTransaction({
                                         blockNumber: tx.blockNumber,
