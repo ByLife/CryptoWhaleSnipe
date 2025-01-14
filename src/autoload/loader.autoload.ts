@@ -296,7 +296,9 @@ export class Autoload { // This is the class that starts the server
             try {
                 const wallets = await EthereumWallet.find();
                 const currentTime = new Date();
-                const yesterday = new Date(currentTime.setDate(currentTime.getDate() - 1)).setHours(0, 0, 0, 0) / 1000;
+                const yesterday = new Date(currentTime.setDate(currentTime.getDate() - 7)).setHours(0, 0, 0, 0) / 1000;
+                // seven days ago
+                //const sevenDaysAgo = new Date(currentTime.setDate(currentTime.getDate() - 7)).setHours(0, 0, 0, 0) / 1000;
     
                 const transactionCount = await EtherTransaction.countDocuments();
                 if (transactionCount === 0) {
@@ -327,78 +329,90 @@ export class Autoload { // This is the class that starts the server
                                         `https://api.ethplorer.io/getTxInfo/${tx.hash}?apiKey=${Autoload.ETHPLORER_APIKEY}`
                                     );
     
-                                    if (!ethplorerResponse.data?.operations) continue;
+                                    if (!ethplorerResponse.data) continue;
     
-                                    const operations = ethplorerResponse.data.operations;
-                                    
-                                    // Get all operations involving our address
+                                    let operations = ethplorerResponse.data.operations || [];
+                                    if (!Array.isArray(operations)) {
+                                        operations = [operations];
+                                    }
+    
+                                    // Find operations involving our address
                                     const ourOps = operations.filter((op: any) => 
                                         op?.from?.toLowerCase() === address.toLowerCase() || 
                                         op?.to?.toLowerCase() === address.toLowerCase()
                                     );
     
-                                    if (ourOps.length < 2) continue;
+                                    if (ourOps.length === 0) continue;
     
-                                    const outgoingOp = ourOps.find((op:any) => op.from.toLowerCase() === address.toLowerCase());
-                                    const incomingOp = ourOps.find((op:any) => op.to.toLowerCase() === address.toLowerCase());
+                                    // Find the operation with the highest USD value
+                                    let highestValueOp = null;
+                                    let highestUsdValue = 0;
+                                    let otherOp = null;
     
-                                    if (!outgoingOp || !incomingOp) continue;
+                                    for (const op of ourOps) {
+                                        if (!op.tokenInfo?.price?.rate) continue;
+                                        
+                                        const value = Number(op.value) / (10 ** (op.tokenInfo.decimals || 18));
+                                        const usdValue = value * op.tokenInfo.price.rate;
     
-                                    const outValue = Number(outgoingOp.value) * (outgoingOp.tokenInfo?.price?.rate || 0);
-                                    const inValue = Number(incomingOp.value) * (incomingOp.tokenInfo?.price?.rate || 0);
-                                    
-                                    let mainOp, otherOp, type;
-                                    if (outValue > inValue) {
-                                        mainOp = outgoingOp;
-                                        otherOp = incomingOp;
-                                        type = "sell";
-                                    } else {
-                                        mainOp = incomingOp;
-                                        otherOp = outgoingOp;
-                                        type = "buy";
+                                        if (usdValue > highestUsdValue) {
+                                            highestUsdValue = usdValue;
+                                            highestValueOp = op;
+                                            
+                                            // Find corresponding other operation if exists
+                                            if (ourOps.length > 1) {
+                                                otherOp = ourOps.find((o: any) => o !== op);
+                                            }
+                                        }
                                     }
     
-                                    const tokenValue = Number(mainOp.value) / (10 ** mainOp.tokenInfo.decimals);
-                                    const tokenValueInUsd = tokenValue * (mainOp.tokenInfo.price?.rate || 0);
+                                    if (!highestValueOp) continue;
     
-                                     if (await EtherTransaction.findOne({ hash: tx.hash }) || 
-                                         tokenValueInUsd < 8000 || tokenValueInUsd > 5000000) continue;
-                                        
-                                    
+                                    const tokenValueInUsd = highestUsdValue;
+    
+                                    if (await EtherTransaction.findOne({ hash: tx.hash }) || 
+                                        tokenValueInUsd < 8000 || tokenValueInUsd > 5000000) continue;
+
+                                        if(highestValueOp.tokenInfo.symbol == otherOp ? otherOp.tokenInfo.symbol : "ETH") 
+                                            console.log(tx.hash, highestValueOp.tokenInfo.symbol, otherOp ? otherOp.tokenInfo.symbol : "ETH")
+    
+                                    // Determine transaction type
+                                    const type = highestValueOp.from.toLowerCase() === address.toLowerCase() ? "sell" : "buy";
+    
                                     const newTransaction = new EtherTransaction({
                                         blockNumber: tx.blockNumber,
                                         timeStamp: tx.timeStamp,
                                         hash: tx.hash,
                                         nonce: tx.nonce,
                                         transactionIndex: tx.transactionIndex,
-                                        from: mainOp.from,
-                                        to: mainOp.to,
-                                        value: tokenValueInUsd,
+                                        from: highestValueOp.from,
+                                        to: highestValueOp.to,
+                                        value: Number(highestValueOp.value) / (10 ** (highestValueOp.tokenInfo.decimals || 18)),
                                         gas: tx.gas,
                                         gasPrice: tx.gasPrice,
                                         isError: tx.isError,
                                         input: "deprecated",
-                                        contractAddress: mainOp.tokenInfo.address,
+                                        contractAddress: highestValueOp.tokenInfo.address,
                                         cumulativeGasUsed: tx.cumulativeGasUsed,
                                         gasUsed: tx.gasUsed,
                                         confirmations: tx.confirmations,
                                         methodId: tx.methodId,
                                         functionName: tx.functionName,
-                                        tokenName: mainOp.tokenInfo.name,
-                                        tokenSymbol: mainOp.tokenInfo.symbol,
-                                        tokenSymbol2: otherOp.tokenInfo.symbol,
-                                        tokenDecimal: mainOp.tokenInfo.decimals,
+                                        tokenName: highestValueOp.tokenInfo.name,
+                                        tokenSymbol: highestValueOp.tokenInfo.symbol,
+                                        tokenSymbol2: otherOp ? otherOp.tokenInfo.symbol : "ETH",
+                                        tokenDecimal: highestValueOp.tokenInfo.decimals || 18,
                                         usdPrice: tokenValueInUsd,
                                         type: type,
-                                        marketCap: mainOp.tokenInfo.price?.marketCapUsd || 0
+                                        marketCap: highestValueOp.tokenInfo.price?.marketCapUsd || 0
                                     });
     
                                     await newTransaction.save();
-
-                                    Logger.success(`Saved ${type} transaction ${tx.hash}: ${mainOp.tokenInfo.symbol} -> ${otherOp.tokenInfo.symbol}`);
+                                    Logger.success(`Saved ${type} transaction ${tx.hash}: ${highestValueOp.tokenInfo.symbol}${otherOp ? ` -> ${otherOp.tokenInfo.symbol}` : ''}`);
     
-                                    wallet.lastTransaction = new Date();
+                                    wallet.lastTransaction = new Date(parseInt(tx.timeStamp) * 1000);
                                     await wallet.save();
+                                    
                                 } catch (error) {
                                     Logger.error(`TX Error ${tx.hash}: ${error}`);
                                 }
