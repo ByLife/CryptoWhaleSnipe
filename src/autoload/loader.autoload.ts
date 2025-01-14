@@ -292,13 +292,13 @@ export class Autoload { // This is the class that starts the server
     
 
     private static async fetchAndUpdateTransactions() {
+        const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+        
         const processTransactions = async () => {
             try {
                 const wallets = await EthereumWallet.find();
                 const currentTime = new Date();
-                const yesterday = new Date(currentTime.setDate(currentTime.getDate() - 7)).setHours(0, 0, 0, 0) / 1000;
-                // seven days ago
-                //const sevenDaysAgo = new Date(currentTime.setDate(currentTime.getDate() - 7)).setHours(0, 0, 0, 0) / 1000;
+                const yesterday = new Date(currentTime.setDate(currentTime.getDate() - 1)).setHours(0, 0, 0, 0) / 1000;
     
                 const transactionCount = await EtherTransaction.countDocuments();
                 if (transactionCount === 0) {
@@ -307,7 +307,7 @@ export class Autoload { // This is the class that starts the server
     
                 for (const wallet of wallets) {
                     for (const address of wallet.wallets) {
-                        await new Promise(resolve => setTimeout(resolve, 1000 / 5));
+                        await delay(200); // 5 requests per second
                         const url = `https://api.etherscan.io/api?module=account&action=tokentx&address=${address}&startblock=0&endblock=99999999&sort=desc&apikey=${Autoload.ETH_APIKEY}`;
     
                         try {
@@ -325,6 +325,11 @@ export class Autoload { // This is the class that starts the server
                                     if (processedTxs.has(tx.hash)) continue;
                                     processedTxs.add(tx.hash);
     
+                                    if (tx.hash === '0x2531e7160db8a8759127b46a357e2bbffdd8de5ad98a542607ff397646c4d132') {
+                                        Logger.info("Found PIN transaction");
+                                    }
+    
+                                    await delay(200); // 5 requests per second
                                     const ethplorerResponse = await axios.get(
                                         `https://api.ethplorer.io/getTxInfo/${tx.hash}?apiKey=${Autoload.ETHPLORER_APIKEY}`
                                     );
@@ -336,79 +341,168 @@ export class Autoload { // This is the class that starts the server
                                         operations = [operations];
                                     }
     
-                                    // Find operations involving our address
-                                    const ourOps = operations.filter((op: any) => 
-                                        op?.from?.toLowerCase() === address.toLowerCase() || 
-                                        op?.to?.toLowerCase() === address.toLowerCase()
+                                    // Filter only for valid token info
+                                    operations = operations.filter((op: any) => 
+                                        op && 
+                                        op.tokenInfo && 
+                                        typeof op.from === 'string' && 
+                                        typeof op.to === 'string' &&
+                                        op.value
                                     );
     
-                                    if (ourOps.length === 0) continue;
+                                    if (operations.length === 0) continue;
     
-                                    // Find the operation with the highest USD value
-                                    let highestValueOp = null;
-                                    let highestUsdValue = 0;
-                                    let otherOp = null;
+                                    // Handle single operation case
+                                    if (operations.length === 1) {
+                                        const operation = operations[0];
     
-                                    for (const op of ourOps) {
-                                        if (!op.tokenInfo?.price?.rate) continue;
+                                        // For single operations, verify if we're either the sender or receiver
+                                        if (operation.from.toLowerCase() !== address.toLowerCase() && 
+                                            operation.to.toLowerCase() !== address.toLowerCase()) continue;
+    
+                                        const tokenDecimals = parseInt(operation.tokenInfo.decimals || '18');
+                                        const tokenValue = Number(operation.value) / (10 ** tokenDecimals);
+                                        const tokenValueInUsd = tokenValue * (operation.tokenInfo.price?.rate || 0);
+    
+                                        if (await EtherTransaction.findOne({ hash: tx.hash }) || 
+                                            tokenValueInUsd < 8000 || tokenValueInUsd > 5000000) continue;
+    
+                                        const type = operation.from.toLowerCase() === address.toLowerCase() ? "sell" : "buy";
+    
+                                        const newTransaction = new EtherTransaction({
+                                            blockNumber: tx.blockNumber,
+                                            timeStamp: tx.timeStamp,
+                                            hash: tx.hash,
+                                            nonce: tx.nonce,
+                                            from: operation.from,
+                                            to: operation.to,
+                                            value: tokenValue,
+                                            gas: tx.gas,
+                                            gasPrice: tx.gasPrice,
+                                            isError: tx.isError,
+                                            input: "deprecated",
+                                            contractAddress: operation.tokenInfo.address,
+                                            cumulativeGasUsed: tx.cumulativeGasUsed,
+                                            gasUsed: tx.gasUsed,
+                                            confirmations: tx.confirmations,
+                                            methodId: tx.methodId,
+                                            functionName: tx.functionName,
+                                            tokenName: operation.tokenInfo.name || '',
+                                            tokenSymbol: operation.tokenInfo.symbol || '',
+                                            tokenSymbol2: "ETH",
+                                            tokenDecimal: operation.tokenInfo.decimals,
+                                            usdPrice: tokenValueInUsd,
+                                            type: type,
+                                            marketCap: operation.tokenInfo.price?.marketCapUsd || 0,
+                                            singleTransaction: true
+                                        });
+    
+                                        await newTransaction.save();
+                                        Logger.success(`Saved ${type} transaction ${tx.hash}: ${operation.tokenInfo.symbol}`);
+    
+                                        wallet.lastTransaction = new Date(parseInt(tx.timeStamp) * 1000);
+                                        await wallet.save();
+                                        continue;
+                                    }
+    
+                                    // For multiple operations, first check if any operation involves our address
+                                    const hasRelevantOperation = operations.some((op: any) => 
+                                        op.from.toLowerCase() === address.toLowerCase() || 
+                                        op.to.toLowerCase() === address.toLowerCase()
+                                    );
+    
+                                    if (!hasRelevantOperation) continue;
+    
+                                    // Then proceed with grouping by token
+                                    const tokenGroups = new Map();
+                                    
+                                    for (const op of operations) {
+                                        const isOutgoing = op.from.toLowerCase() === address.toLowerCase();
+                                        const isIncoming = op.to.toLowerCase() === address.toLowerCase();
                                         
-                                        const value = Number(op.value) / (10 ** (op.tokenInfo.decimals || 18));
-                                        const usdValue = value * op.tokenInfo.price.rate;
+                                        // For multiple operations, include all operations of the transaction
+                                        const direction = isOutgoing ? 'out' : isIncoming ? 'in' : 'other';
+                                        const key = `${op.tokenInfo.symbol}-${direction}`;
+                                        
+                                        if (!tokenGroups.has(key)) {
+                                            tokenGroups.set(key, {
+                                                token: op.tokenInfo,
+                                                direction: direction,
+                                                totalValue: 0,
+                                                totalUsdValue: 0,
+                                                operations: []
+                                            });
+                                        }
+                                        
+                                        const group = tokenGroups.get(key);
+                                        const value = Number(op.value) / (10 ** Number(op.tokenInfo.decimals || 18));
+                                        const usdValue = value * (op.tokenInfo.price?.rate || 0);
+                                        
+                                        group.totalValue += value;
+                                        group.totalUsdValue += usdValue;
+                                        group.operations.push(op);
+                                    }
     
-                                        if (usdValue > highestUsdValue) {
-                                            highestUsdValue = usdValue;
-                                            highestValueOp = op;
-                                            
-                                            // Find corresponding other operation if exists
-                                            if (ourOps.length > 1) {
-                                                otherOp = ourOps.find((o: any) => o !== op);
-                                            }
+                                    // Find the significant groups
+                                    let outgoingGroup = null;
+                                    let incomingGroup = null;
+                                    let maxOutValue = 0;
+                                    let maxInValue = 0;
+    
+                                    for (const [key, group] of tokenGroups.entries()) {
+                                        if (group.direction === 'out' && group.totalUsdValue > maxOutValue) {
+                                            maxOutValue = group.totalUsdValue;
+                                            outgoingGroup = group;
+                                        } else if (group.direction === 'in' && group.totalUsdValue > maxInValue) {
+                                            maxInValue = group.totalUsdValue;
+                                            incomingGroup = group;
                                         }
                                     }
     
-                                    if (!highestValueOp) continue;
+                                    // Handle case where one side might be missing (transfer case)
+                                    if (!outgoingGroup && !incomingGroup) continue;
     
-                                    const tokenValueInUsd = highestUsdValue;
+                                    const mainGroup = outgoingGroup?.totalUsdValue > (incomingGroup?.totalUsdValue || 0) ? outgoingGroup : incomingGroup;
+                                    const otherGroup = mainGroup === outgoingGroup ? incomingGroup : outgoingGroup;
+                                    
+                                    const tokenValueInUsd = mainGroup.totalUsdValue;
     
                                     if (await EtherTransaction.findOne({ hash: tx.hash }) || 
                                         tokenValueInUsd < 8000 || tokenValueInUsd > 5000000) continue;
-
-                                        if(highestValueOp.tokenInfo.symbol == otherOp ? otherOp.tokenInfo.symbol : "ETH") 
-                                            console.log(tx.hash, highestValueOp.tokenInfo.symbol, otherOp ? otherOp.tokenInfo.symbol : "ETH")
     
-                                    // Determine transaction type
-                                    const type = highestValueOp.from.toLowerCase() === address.toLowerCase() ? "sell" : "buy";
-    
+                                    const firstOp = mainGroup.operations[0];
+                                    
                                     const newTransaction = new EtherTransaction({
                                         blockNumber: tx.blockNumber,
                                         timeStamp: tx.timeStamp,
                                         hash: tx.hash,
                                         nonce: tx.nonce,
                                         transactionIndex: tx.transactionIndex,
-                                        from: highestValueOp.from,
-                                        to: highestValueOp.to,
-                                        value: Number(highestValueOp.value) / (10 ** (highestValueOp.tokenInfo.decimals || 18)),
+                                        from: firstOp.from,
+                                        to: firstOp.to,
+                                        value: mainGroup.totalValue,
                                         gas: tx.gas,
                                         gasPrice: tx.gasPrice,
                                         isError: tx.isError,
                                         input: "deprecated",
-                                        contractAddress: highestValueOp.tokenInfo.address,
+                                        contractAddress: firstOp.tokenInfo.address,
                                         cumulativeGasUsed: tx.cumulativeGasUsed,
                                         gasUsed: tx.gasUsed,
                                         confirmations: tx.confirmations,
                                         methodId: tx.methodId,
                                         functionName: tx.functionName,
-                                        tokenName: highestValueOp.tokenInfo.name,
-                                        tokenSymbol: highestValueOp.tokenInfo.symbol,
-                                        tokenSymbol2: otherOp ? otherOp.tokenInfo.symbol : "ETH",
-                                        tokenDecimal: highestValueOp.tokenInfo.decimals || 18,
+                                        tokenName: firstOp.tokenInfo.name || '',
+                                        tokenSymbol: firstOp.tokenInfo.symbol || '',
+                                        tokenSymbol2: otherGroup ? otherGroup.token.symbol : "ETH",
+                                        tokenDecimal: firstOp.tokenInfo.decimals || 18,
                                         usdPrice: tokenValueInUsd,
-                                        type: type,
-                                        marketCap: highestValueOp.tokenInfo.price?.marketCapUsd || 0
+                                        type: mainGroup === outgoingGroup ? "sell" : "buy",
+                                        marketCap: firstOp.tokenInfo.price?.marketCapUsd || 0,
+                                        singleTransaction: false
                                     });
     
                                     await newTransaction.save();
-                                    Logger.success(`Saved ${type} transaction ${tx.hash}: ${highestValueOp.tokenInfo.symbol}${otherOp ? ` -> ${otherOp.tokenInfo.symbol}` : ''}`);
+                                    Logger.success(`Saved ${newTransaction.type} transaction ${tx.hash}: ${mainGroup.token.symbol}${otherGroup ? ` -> ${otherGroup.token.symbol}` : ''}`);
     
                                     wallet.lastTransaction = new Date(parseInt(tx.timeStamp) * 1000);
                                     await wallet.save();
@@ -435,7 +529,6 @@ export class Autoload { // This is the class that starts the server
             Autoload.fetchAndUpdateTransactions();
         }, 100);
     }
-
     
     protected static async getTokenPriceAndSymbol(hash: string, tokenSymbol: string, walletAddress: string) {
         // delay to keep under 10 req/s

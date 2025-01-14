@@ -28,6 +28,7 @@ export interface EtherTransaction {
     type: string;
     tokenSymbol2: string;
     marketCap: number;
+    singleTransaction?: boolean;
 }
 
 const EtherTransactionSchema = new Schema({
