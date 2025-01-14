@@ -325,10 +325,6 @@ export class Autoload { // This is the class that starts the server
                                     if (processedTxs.has(tx.hash)) continue;
                                     processedTxs.add(tx.hash);
     
-                                    if (tx.hash === '0x2531e7160db8a8759127b46a357e2bbffdd8de5ad98a542607ff397646c4d132') {
-                                        Logger.info("Found PIN transaction");
-                                    }
-    
                                     await delay(200); // 5 requests per second
                                     const ethplorerResponse = await axios.get(
                                         `https://api.ethplorer.io/getTxInfo/${tx.hash}?apiKey=${Autoload.ETHPLORER_APIKEY}`
