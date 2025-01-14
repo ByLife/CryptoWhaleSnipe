@@ -296,7 +296,7 @@ export class Autoload { // This is the class that starts the server
             try {
                 const wallets = await EthereumWallet.find();
                 const currentTime = new Date();
-                const yesterday = new Date(currentTime.setDate(currentTime.getDate() - 7)).setHours(0, 0, 0, 0) / 1000;
+                const yesterday = new Date(currentTime.setDate(currentTime.getDate() - 1)).setHours(0, 0, 0, 0) / 1000;
                 // seven days ago
                 //const sevenDaysAgo = new Date(currentTime.setDate(currentTime.getDate() - 7)).setHours(0, 0, 0, 0) / 1000;
     
