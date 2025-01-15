@@ -292,6 +292,8 @@ export class Autoload { // This is the class that starts the server
     
 
     private static async fetchAndUpdateTransactions() {
+        const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+        
         const processTransactions = async () => {
             try {
                 const wallets = await EthereumWallet.find();
@@ -305,7 +307,7 @@ export class Autoload { // This is the class that starts the server
     
                 for (const wallet of wallets) {
                     for (const address of wallet.wallets) {
-                        await new Promise(resolve => setTimeout(resolve, 1000 / 5));
+                        await delay(200); // 5 requests per second
                         const url = `https://api.etherscan.io/api?module=account&action=tokentx&address=${address}&startblock=0&endblock=99999999&sort=desc&apikey=${Autoload.ETH_APIKEY}`;
     
                         try {
@@ -323,47 +325,148 @@ export class Autoload { // This is the class that starts the server
                                     if (processedTxs.has(tx.hash)) continue;
                                     processedTxs.add(tx.hash);
     
+                                    await delay(200); // 5 requests per second
                                     const ethplorerResponse = await axios.get(
                                         `https://api.ethplorer.io/getTxInfo/${tx.hash}?apiKey=${Autoload.ETHPLORER_APIKEY}`
                                     );
     
-                                    if (!ethplorerResponse.data?.operations) continue;
+                                    if (!ethplorerResponse.data) continue;
     
-                                    const operations = ethplorerResponse.data.operations;
-                                    
-                                    // Get all operations involving our address
-                                    const ourOps = operations.filter((op: any) => 
-                                        op?.from?.toLowerCase() === address.toLowerCase() || 
-                                        op?.to?.toLowerCase() === address.toLowerCase()
-                                    );
-    
-                                    if (ourOps.length < 2) continue;
-    
-                                    const outgoingOp = ourOps.find((op:any) => op.from.toLowerCase() === address.toLowerCase());
-                                    const incomingOp = ourOps.find((op:any) => op.to.toLowerCase() === address.toLowerCase());
-    
-                                    if (!outgoingOp || !incomingOp) continue;
-    
-                                    const outValue = Number(outgoingOp.value) * (outgoingOp.tokenInfo?.price?.rate || 0);
-                                    const inValue = Number(incomingOp.value) * (incomingOp.tokenInfo?.price?.rate || 0);
-                                    
-                                    let mainOp, otherOp, type;
-                                    if (outValue > inValue) {
-                                        mainOp = outgoingOp;
-                                        otherOp = incomingOp;
-                                        type = "sell";
-                                    } else {
-                                        mainOp = incomingOp;
-                                        otherOp = outgoingOp;
-                                        type = "buy";
+                                    let operations = ethplorerResponse.data.operations || [];
+                                    if (!Array.isArray(operations)) {
+                                        operations = [operations];
                                     }
     
-                                    const tokenValue = Number(mainOp.value) / (10 ** mainOp.tokenInfo.decimals);
-                                    const tokenValueInUsd = tokenValue * (mainOp.tokenInfo.price?.rate || 0);
+                                    // Filter only for valid token info
+                                    operations = operations.filter((op: any) => 
+                                        op && 
+                                        op.tokenInfo && 
+                                        typeof op.from === 'string' && 
+                                        typeof op.to === 'string' &&
+                                        op.value
+                                    );
     
-                                     if (await EtherTransaction.findOne({ hash: tx.hash }) || 
-                                         tokenValueInUsd < 8000 || tokenValueInUsd > 5000000) continue;
+                                    if (operations.length === 0) continue;
+    
+                                    // Handle single operation case
+                                    if (operations.length === 1) {
+                                        const operation = operations[0];
+    
+                                        // For single operations, verify if we're either the sender or receiver
+                                        if (operation.from.toLowerCase() !== address.toLowerCase() && 
+                                            operation.to.toLowerCase() !== address.toLowerCase()) continue;
+    
+                                        const tokenDecimals = parseInt(operation.tokenInfo.decimals || '18');
+                                        const tokenValue = Number(operation.value) / (10 ** tokenDecimals);
+                                        const tokenValueInUsd = tokenValue * (operation.tokenInfo.price?.rate || 0);
+    
+                                        if (await EtherTransaction.findOne({ hash: tx.hash }) || 
+                                            tokenValueInUsd < 8000 || tokenValueInUsd > 5000000) continue;
+    
+                                        const type = operation.from.toLowerCase() === address.toLowerCase() ? "sell" : "buy";
+    
+                                        const newTransaction = new EtherTransaction({
+                                            blockNumber: tx.blockNumber,
+                                            timeStamp: tx.timeStamp,
+                                            hash: tx.hash,
+                                            nonce: tx.nonce,
+                                            from: operation.from,
+                                            to: operation.to,
+                                            value: tokenValue,
+                                            gas: tx.gas,
+                                            gasPrice: tx.gasPrice,
+                                            isError: tx.isError,
+                                            input: "deprecated",
+                                            contractAddress: operation.tokenInfo.address,
+                                            cumulativeGasUsed: tx.cumulativeGasUsed,
+                                            gasUsed: tx.gasUsed,
+                                            confirmations: tx.confirmations,
+                                            methodId: tx.methodId,
+                                            functionName: tx.functionName,
+                                            tokenName: operation.tokenInfo.name || '',
+                                            tokenSymbol: operation.tokenInfo.symbol || '',
+                                            tokenSymbol2: "ETH",
+                                            tokenDecimal: operation.tokenInfo.decimals,
+                                            usdPrice: tokenValueInUsd,
+                                            type: type,
+                                            marketCap: operation.tokenInfo.price?.marketCapUsd || 0,
+                                            singleTransaction: true
+                                        });
+    
+                                        await newTransaction.save();
+                                        Logger.success(`Saved ${type} transaction ${tx.hash}: ${operation.tokenInfo.symbol}`);
+    
+                                        wallet.lastTransaction = new Date(parseInt(tx.timeStamp) * 1000);
+                                        await wallet.save();
+                                        continue;
+                                    }
+    
+                                    // For multiple operations, first check if any operation involves our address
+                                    const hasRelevantOperation = operations.some((op: any) => 
+                                        op.from.toLowerCase() === address.toLowerCase() || 
+                                        op.to.toLowerCase() === address.toLowerCase()
+                                    );
+    
+                                    if (!hasRelevantOperation) continue;
+    
+                                    // Then proceed with grouping by token
+                                    const tokenGroups = new Map();
+                                    
+                                    for (const op of operations) {
+                                        const isOutgoing = op.from.toLowerCase() === address.toLowerCase();
+                                        const isIncoming = op.to.toLowerCase() === address.toLowerCase();
                                         
+                                        // For multiple operations, include all operations of the transaction
+                                        const direction = isOutgoing ? 'out' : isIncoming ? 'in' : 'other';
+                                        const key = `${op.tokenInfo.symbol}-${direction}`;
+                                        
+                                        if (!tokenGroups.has(key)) {
+                                            tokenGroups.set(key, {
+                                                token: op.tokenInfo,
+                                                direction: direction,
+                                                totalValue: 0,
+                                                totalUsdValue: 0,
+                                                operations: []
+                                            });
+                                        }
+                                        
+                                        const group = tokenGroups.get(key);
+                                        const value = Number(op.value) / (10 ** Number(op.tokenInfo.decimals || 18));
+                                        const usdValue = value * (op.tokenInfo.price?.rate || 0);
+                                        
+                                        group.totalValue += value;
+                                        group.totalUsdValue += usdValue;
+                                        group.operations.push(op);
+                                    }
+    
+                                    // Find the significant groups
+                                    let outgoingGroup = null;
+                                    let incomingGroup = null;
+                                    let maxOutValue = 0;
+                                    let maxInValue = 0;
+    
+                                    for (const [key, group] of tokenGroups.entries()) {
+                                        if (group.direction === 'out' && group.totalUsdValue > maxOutValue) {
+                                            maxOutValue = group.totalUsdValue;
+                                            outgoingGroup = group;
+                                        } else if (group.direction === 'in' && group.totalUsdValue > maxInValue) {
+                                            maxInValue = group.totalUsdValue;
+                                            incomingGroup = group;
+                                        }
+                                    }
+    
+                                    // Handle case where one side might be missing (transfer case)
+                                    if (!outgoingGroup && !incomingGroup) continue;
+    
+                                    const mainGroup = outgoingGroup?.totalUsdValue > (incomingGroup?.totalUsdValue || 0) ? outgoingGroup : incomingGroup;
+                                    const otherGroup = mainGroup === outgoingGroup ? incomingGroup : outgoingGroup;
+                                    
+                                    const tokenValueInUsd = mainGroup.totalUsdValue;
+    
+                                    if (await EtherTransaction.findOne({ hash: tx.hash }) || 
+                                        tokenValueInUsd < 8000 || tokenValueInUsd > 5000000) continue;
+    
+                                    const firstOp = mainGroup.operations[0];
                                     
                                     const newTransaction = new EtherTransaction({
                                         blockNumber: tx.blockNumber,
@@ -371,34 +474,35 @@ export class Autoload { // This is the class that starts the server
                                         hash: tx.hash,
                                         nonce: tx.nonce,
                                         transactionIndex: tx.transactionIndex,
-                                        from: mainOp.from,
-                                        to: mainOp.to,
-                                        value: tokenValueInUsd,
+                                        from: firstOp.from,
+                                        to: firstOp.to,
+                                        value: mainGroup.totalValue,
                                         gas: tx.gas,
                                         gasPrice: tx.gasPrice,
                                         isError: tx.isError,
                                         input: "deprecated",
-                                        contractAddress: mainOp.tokenInfo.address,
+                                        contractAddress: firstOp.tokenInfo.address,
                                         cumulativeGasUsed: tx.cumulativeGasUsed,
                                         gasUsed: tx.gasUsed,
                                         confirmations: tx.confirmations,
                                         methodId: tx.methodId,
                                         functionName: tx.functionName,
-                                        tokenName: mainOp.tokenInfo.name,
-                                        tokenSymbol: mainOp.tokenInfo.symbol,
-                                        tokenSymbol2: otherOp.tokenInfo.symbol,
-                                        tokenDecimal: mainOp.tokenInfo.decimals,
+                                        tokenName: firstOp.tokenInfo.name || '',
+                                        tokenSymbol: firstOp.tokenInfo.symbol || '',
+                                        tokenSymbol2: otherGroup ? otherGroup.token.symbol : "ETH",
+                                        tokenDecimal: firstOp.tokenInfo.decimals || 18,
                                         usdPrice: tokenValueInUsd,
-                                        type: type,
-                                        marketCap: mainOp.tokenInfo.price?.marketCapUsd || 0
+                                        type: mainGroup === outgoingGroup ? "sell" : "buy",
+                                        marketCap: firstOp.tokenInfo.price?.marketCapUsd || 0,
+                                        singleTransaction: false
                                     });
     
                                     await newTransaction.save();
-
-                                    Logger.success(`Saved ${type} transaction ${tx.hash}: ${mainOp.tokenInfo.symbol} -> ${otherOp.tokenInfo.symbol}`);
+                                    Logger.success(`Saved ${newTransaction.type} transaction ${tx.hash}: ${mainGroup.token.symbol}${otherGroup ? ` -> ${otherGroup.token.symbol}` : ''}`);
     
-                                    wallet.lastTransaction = new Date();
+                                    wallet.lastTransaction = new Date(parseInt(tx.timeStamp) * 1000);
                                     await wallet.save();
+                                    
                                 } catch (error) {
                                     Logger.error(`TX Error ${tx.hash}: ${error}`);
                                 }
@@ -421,7 +525,6 @@ export class Autoload { // This is the class that starts the server
             Autoload.fetchAndUpdateTransactions();
         }, 100);
     }
-
     
     protected static async getTokenPriceAndSymbol(hash: string, tokenSymbol: string, walletAddress: string) {
         // delay to keep under 10 req/s
