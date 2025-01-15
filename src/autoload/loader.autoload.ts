@@ -27,15 +27,6 @@ interface TokenDetail {
     usdValue: number;
 }
 
-interface TokenOperationData {
-    symbol: string;
-    decimals: number;
-    price: number;
-    totalOut: number;
-    totalIn: number;
-    operations: any[];
-}
-
 interface TransactionTokenDetails {
     outTokens: TokenDetail[];
     inTokens: TokenDetail[];
@@ -301,16 +292,6 @@ export class Autoload { // This is the class that starts the server
         setTimeout(Autoload.fetchAndUpdateBnbTransactions, 5000);
     }
     
-    private static async getTokenPriceFromPancakeSwap(tokenAddress: string): Promise<number> {
-        try {
-            const response = await axios.get(`https://api.pancakeswap.info/api/v2/tokens/${tokenAddress}`);
-            return response.data.data.price || 0;
-        } catch (error) {
-            Logger.error(`Failed to fetch token price from PancakeSwap: ${error}`);
-            return 0;
-        }
-    }   
-    
     public static async fetchAndUpdateTransactions() {
         const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
       
@@ -318,9 +299,9 @@ export class Autoload { // This is the class that starts the server
           try {
             const wallets = await EthereumWallet.find();
             const currentTime = new Date();
-            // Last 3 days:
+            // Last day:
             const threeDaysAgo = Math.floor(
-              (currentTime.getTime() - 3 * 24 * 60 * 60 * 1000) / 1000
+              (currentTime.getTime() - 24 * 60 * 60 * 1000) / 1000
             );
       
             for (const wallet of wallets) {
