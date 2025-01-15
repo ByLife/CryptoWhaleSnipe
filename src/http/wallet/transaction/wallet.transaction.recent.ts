@@ -14,40 +14,68 @@ export default {
             if(!req.token) throw "Unauthorized access, missing 'token' in request header"
             if(!await AccessBearer.findOne({token: req.token})) throw "Unauthorized access"
 
-            const oneDayAgoInSeconds = Math.floor((Date.now() - 24 * 60 * 60 * 1000) / 1000); // Convert to seconds
+            const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
             const transactions = await EtherTransaction.find({
-                timeStamp: {
-                    $gte: oneDayAgoInSeconds
+                timestamp: {
+                    $gte: oneDayAgo
                 }
             }).lean();
 
             const results = [];
             for (const tx of transactions) {
-
+                // Find wallet that matches either from or to address
                 const wallet = await EthereumWallet.findOne({
                     wallets: { $in: [tx.from, tx.to] }
                 }).lean();
 
-                if (!wallet) {
-                    continue;
-                }
+                if (!wallet) continue;
 
-                const walletAddress = wallet.wallets.includes(tx.from) ? tx.from : tx.to; 
+                // Skip transactions without valid addresses
+                if (!tx.from && !tx.to) continue;
+                
+                // Ensure both addresses are strings before checking
+                const fromAddress = tx.from || '';
+                const toAddress = tx.to || '';
+                const walletAddress = wallet.wallets.includes(fromAddress) ? fromAddress : toAddress;
+                
+                // Skip if we couldn't determine a valid wallet address
+                if (!walletAddress) continue;
+
+                // Determine token symbols based on transaction type
+                let primaryTokenSymbol = '';
+                let secondaryTokenSymbol = '';
+                let value = 0;
+                let usdPrice = 0;
+
+                if (tx.type === 'swap') {
+                    // For swaps, use outTokens and inTokens
+                    primaryTokenSymbol = tx.outTokens?.[0]?.symbol || '';
+                    secondaryTokenSymbol = tx.finalToken?.symbol || tx.inTokens?.[tx.inTokens.length - 1]?.symbol || '';
+                    value = tx.outTokens?.[0]?.amount || 0;
+                    usdPrice = tx.totalUsdValue || 0;
+                } else {
+                    // For other transactions, use the single token info
+                    primaryTokenSymbol = tx.tokenSymbol || '';
+                    secondaryTokenSymbol = tx.tokenSymbol2 || '';
+                    value = tx.value || 0;
+                    usdPrice = tx.usdPrice || 0;
+                }
 
                 results.push({
                     username: wallet.username,
                     wallet: walletAddress,
-                    tokenSymbol: tx.tokenSymbol,
+                    tokenSymbol: primaryTokenSymbol,
                     hash: tx.hash,
                     gasUsed: tx.gasUsed,
-                    timeStamp: tx.timeStamp,
-                    usdPrice: tx.usdPrice,
-                    value: tx.value,
+                    timeStamp: tx.timestamp ? Math.floor(tx.timestamp.getTime() / 1000).toString() : '',
+                    usdPrice: usdPrice,
+                    value: value,
                     type: tx.type,
-                    tokenSymbol2: tx.tokenSymbol2,
+                    tokenSymbol2: secondaryTokenSymbol,
                     influencer: wallet.influencer,
                     image: wallet.image,
-                    nickname: wallet.nickname
+                    nickname: wallet.nickname,
+                    summary: tx.summary // Adding the transaction summary for better context
                 });
             }
 
