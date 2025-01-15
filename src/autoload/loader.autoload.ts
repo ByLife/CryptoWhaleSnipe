@@ -342,7 +342,7 @@ export class Autoload { // This is the class that starts the server
                   console.error(`Error fetching Etherscan tokenTx for ${address}`, err);
                   continue;
                 }
-      
+
                 if (!response?.data?.result) {
                   console.log(`No tokenTx results found for ${address}`);
                   continue;
