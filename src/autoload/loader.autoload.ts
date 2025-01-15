@@ -320,20 +320,15 @@ export class Autoload { // This is the class that starts the server
             const currentTime = new Date();
             // Last 3 days:
             const threeDaysAgo = Math.floor(
-                (currentTime.getTime() - 7 * 24 * 60 * 60 * 1000) / 1000
+              (currentTime.getTime() - 3 * 24 * 60 * 60 * 1000) / 1000
             );
-
-            const weekAgo = Math.floor(
-                (currentTime.getTime() - 7 * 24 * 60 * 60 * 1000) / 1000
-            );
-
       
             for (const wallet of wallets) {
               for (const address of wallet.wallets) {
                 console.log(`\n[FETCH] Transactions for ${wallet.username} - ${address}`);
                 await delay(200);
       
-                // 1) Fetch from Etherscan's tokenTx endpoint (ERC-20 history)
+                // 1) Fetch from Etherscan's tokenTx endpoint (ERC-20 logs)
                 const url =
                   `https://api.etherscan.io/api` +
                   `?module=account&action=tokentx&address=${address}` +
@@ -367,7 +362,7 @@ export class Autoload { // This is the class that starts the server
                 for (const tx of transactions) {
                   index++;
                   try {
-                    // Avoid duplicates
+                    // Avoid duplicates by tx.hash
                     if (processedTxs.has(tx.hash)) continue;
                     processedTxs.add(tx.hash);
       
@@ -390,48 +385,67 @@ export class Autoload { // This is the class that starts the server
                     }
       
                     const txData = ethplorerResponse.data;
-                    // CRITICAL: read the "real" from/to/value from the top-level, not from tokenTx
-                    const realFrom = txData.from?.toLowerCase() || "";
-                    const realTo = txData.to?.toLowerCase() || "";
-                    const realValueWei = parseFloat(txData.value || "0"); // raw wei
       
-                    // We'll parse the operations array
-                    const operations = txData.operations || [];
-                    console.log(
-                      `TX ${tx.hash}: top-level from=${realFrom}, to=${realTo}, valueWei=${realValueWei}, ops=${operations.length}`
-                    );
+                    // read the "real" from/to/value from the top-level of Ethplorer
+                    const realFrom = (txData.from || "").toLowerCase();
+                    const realTo = (txData.to || "").toLowerCase();
+      
+                    // IMPORTANT: Ethplorer uses 'value' as a floating number (ETH), not Wei
+                    // if logs=[] and there's a 'value', it's a pure ETH tx
+                    // e.g. "value": 37.51886823 means 37.51886823 ETH
+                    const realValueETH = parseFloat(txData.value || "0");
       
                     const userAddr = address.toLowerCase();
                     const userIsSender = (realFrom === userAddr);
+                    let spentEthAmount = 0; // track how much ETH the user spent
       
-                    // ----------------------------------------------------------
-                    // Step A) Build aggregated tokenOperations from Ethplorer logs
-                    // ----------------------------------------------------------
-                    // We'll store everything in tokenOperations so we can track totalIn / totalOut
-                    const tokenOperations = new Map<string, TokenOperationData>();
+                    // We'll parse the "operations" array for ERC-20 logs
+                    const operations = txData.operations || [];
       
-                    // If user was top-level sender and spent ETH
-                    let spentEthAmount = 0;
-                    if (userIsSender && realValueWei > 0) {
-                      spentEthAmount = realValueWei / 1e18; // convert to ETH
-                      // We'll store a synthetic "ETH out"
-                      const fallbackEthPrice = 1700; // Adjust as needed
+                    // We'll build up a map of tokens => aggregated totals
+                    const tokenOperations = new Map<string, {
+                      symbol: string;
+                      decimals: number;
+                      price: number;
+                      totalOut: number;
+                      totalIn: number;
+                      operations: any[];
+                    }>();
+      
+                    // --- 1) If top-level user is sender and there's a top-level ETH value
+                    if (userIsSender && realValueETH > 0) {
+                      spentEthAmount = realValueETH;
+                      // create an entry for "ETH"
+                      const fallbackEthPrice = 1700; // or your price feed
                       tokenOperations.set("0xETH_NATIVE", {
                         symbol: "ETH",
                         decimals: 18,
                         price: fallbackEthPrice,
-                        totalOut: spentEthAmount,
+                        totalOut: realValueETH,
                         totalIn: 0,
                         operations: []
                       });
                     }
       
-                    // Parse all ERC20 operations
+                    // --- 2) If top-level user is receiver and there's a top-level ETH value
+                    if (!userIsSender && realTo === userAddr && realValueETH > 0) {
+                      // user is receiving ETH
+                      const fallbackEthPrice = 1700;
+                      tokenOperations.set("0xETH_NATIVE", {
+                        symbol: "ETH",
+                        decimals: 18,
+                        price: fallbackEthPrice,
+                        totalOut: 0,
+                        totalIn: realValueETH,
+                        operations: []
+                      });
+                    }
+      
+                    // *** Now parse the operations array for ERC-20 in/out
                     for (const op of operations) {
                       const tokenAddr = op.tokenInfo?.address?.toLowerCase();
                       if (!tokenAddr) continue;
       
-                      // Initialize map entry if needed
                       if (!tokenOperations.has(tokenAddr)) {
                         tokenOperations.set(tokenAddr, {
                           symbol: op.tokenInfo?.symbol || "UNKNOWN",
@@ -448,77 +462,32 @@ export class Autoload { // This is the class that starts the server
                       const tOp = tokenOperations.get(tokenAddr)!;
                       tOp.operations.push(op);
       
-                      // Convert the token value
-                      const numericValue =
-                        parseFloat(op.value) / (10 ** tOp.decimals);
+                      // Convert value from raw string to numeric, using decimals
+                      const numericValue = parseFloat(op.value) / (10 ** tOp.decimals);
       
-                      // If op.from is user, it's outgoing
-                      if (op.from?.toLowerCase() === userAddr) {
+                      // If op.from is user => out
+                      if ((op.from || "").toLowerCase() === userAddr) {
                         tOp.totalOut += numericValue;
                       }
-                      // If op.to is user, it's incoming
-                      if (op.to?.toLowerCase() === userAddr) {
+                      // If op.to is user => in
+                      if ((op.to || "").toLowerCase() === userAddr) {
                         tOp.totalIn += numericValue;
                       }
                     }
       
-                    // ----------------------------------------------------------
-                    // Step B) Fetch Internal Transactions from Etherscan
-                    //     to detect if user received native ETH internally
-                    // ----------------------------------------------------------
-                    const internalTxUrl = `https://api.etherscan.io/api`
-                      + `?module=account&action=txlistinternal`
-                      + `&txhash=${tx.hash}`
-                      + `&apikey=${Autoload.ETH_APIKEY}`;
-                    let internalTxResp;
-                    try {
-                      internalTxResp = await axios.get(internalTxUrl);
-                    } catch (err) {
-                      console.error(`Failed internalTx for ${tx.hash}`, err);
-                    }
-      
-                    const internalTransfers = internalTxResp?.data?.result || [];
-                    // If user got native ETH internally, let's add it as "ETH" in
-                    for (const itx of internalTransfers) {
-                      const toAddr = itx.to?.toLowerCase();
-                      // We only care if user is the recipient
-                      if (toAddr === userAddr && parseInt(itx.value) > 0) {
-                        const fallbackEthPrice = 1700; // or dynamic
-                        const nativeKey = "0xETH_NATIVE";
-                        if (!tokenOperations.has(nativeKey)) {
-                          tokenOperations.set(nativeKey, {
-                            symbol: "ETH",
-                            decimals: 18,
-                            price: fallbackEthPrice,
-                            totalOut: 0,
-                            totalIn: 0,
-                            operations: []
-                          });
-                        }
-                        const nativeEthOp = tokenOperations.get(nativeKey)!;
-                        const valWei = parseFloat(itx.value);
-                        const valEth = valWei / 1e18;
-                        nativeEthOp.totalIn += valEth;
-                        // Optionally store an internalTx op
-                        nativeEthOp.operations.push({
-                          type: "internalTx",
-                          from: itx.from?.toLowerCase() || "",
-                          to: toAddr,
-                          value: itx.value
-                        });
-                      }
-                    }
-      
-                    // ----------------------------------------------------------
-                    // Step C) Classify (swap, send, receive, mint, etc.)
-                    // ----------------------------------------------------------
-                    const tokenDetails: TransactionTokenDetails = {
+                    // 3) Build final classification and details
+                    let type = "unknown";
+                    const tokenDetails: {
+                      outTokens: { symbol: string; amount: number; usdValue: number }[];
+                      inTokens: { symbol: string; amount: number; usdValue: number }[];
+                      finalToken: null | { symbol: string; amount: number; usdValue: number };
+                    } = {
                       outTokens: [],
                       inTokens: [],
                       finalToken: null
                     };
       
-                    // Summarize outTokens / inTokens
+                    // Summarize outTokens/inTokens from the aggregated tokenOperations
                     for (const [addr, data] of tokenOperations) {
                       if (data.totalOut > 0) {
                         tokenDetails.outTokens.push({
@@ -536,37 +505,36 @@ export class Autoload { // This is the class that starts the server
                       }
                     }
       
-                    // Identify final token by looking at the last ERC-20 op that credited the user
+                    // *** Identify finalToken (the last token credited to user).
+                    // We'll do a simple approach: look for the last operation that credited the user.
                     const lastIncomingOp = [...operations].reverse().find(
-                      (op: any) => op.to?.toLowerCase() === userAddr
+                      (op) => (op.to || "").toLowerCase() === userAddr
                     );
                     if (lastIncomingOp) {
-                      const finalAddr = lastIncomingOp.tokenInfo?.address?.toLowerCase();
+                      const finalAddr = (lastIncomingOp.tokenInfo?.address || "").toLowerCase();
                       if (finalAddr && tokenOperations.has(finalAddr)) {
                         const finalData = tokenOperations.get(finalAddr)!;
-                        const finalAmt = parseFloat(lastIncomingOp.value) /
-                                         (10 ** finalData.decimals);
+                        const finalAmt =
+                          parseFloat(lastIncomingOp.value) / (10 ** finalData.decimals);
                         tokenDetails.finalToken = {
                           symbol: finalData.symbol,
                           amount: finalAmt,
                           usdValue: finalAmt * finalData.price
                         };
                       }
-                    } else {
-                      // Possibly check if user minted or unwrapped WETH -> ETH
-                      // (But we've already handled internalTx -> ETH above)
                     }
       
-                    // Basic type classification
-                    let type = "unknown";
-      
-                    // Mint detection:
-                    const fromIsZero = operations[0] &&
+                    // *** Classification Logic
+                    // Check if user minted something:
+                    let fromIsZero =
+                      operations[0] &&
                       (!operations[0].from ||
                         operations[0].from === "0x0000000000000000000000000000000000000000");
-                    if (fromIsZero && operations[0]?.to?.toLowerCase() === userAddr) {
+      
+                    if (fromIsZero && (operations[0]?.to || "").toLowerCase() === userAddr) {
                       type = "mint";
                     } else {
+                      // "hasOut" means user has at least one outToken
                       const hasOut = tokenDetails.outTokens.length > 0;
                       const hasIn = tokenDetails.inTokens.length > 0;
       
@@ -579,70 +547,59 @@ export class Autoload { // This is the class that starts the server
                       }
                     }
       
-                    // SWAP OVERRIDE if user was top-level sender with ETH
-                    // but we ended up with "receive" or "send" incorrectly
+                    // *** If user is top-level sender with ETH but ended up "receive" or "send",
+                    // override to "swap" if they got a different token
                     if (
                       userIsSender &&
                       spentEthAmount > 0 &&
-                      type === "receive" &&
+                      (type === "receive" || type === "send") &&
                       tokenDetails.inTokens.some((t) => t.symbol !== "ETH")
                     ) {
-                      console.log("[SWAP OVERRIDE] user spent native ETH, got a different token");
                       type = "swap";
                     }
       
-                    // Check if multi-swap (multiple tokens in/out)
-                    const distinctOutTokens = tokenDetails.outTokens.filter(t => t.amount > 0);
-                    const distinctInTokens = tokenDetails.inTokens.filter(t => t.amount > 0);
-                    const isMultiSwap =
-                      distinctOutTokens.length > 1 || distinctInTokens.length > 1;
-                    if (isMultiSwap && type === "swap") {
-                      type = "multi-swap";
+                    // *** Possibly detect multiple tokens in/out => "multi-swap"
+                    // But you requested to list all tokens, not just "MULTIPLE"
+                    // We'll store them in a comma separated list
+                    const outSymbols = tokenDetails.outTokens.map((t) => t.symbol);
+                    const inSymbols = tokenDetails.inTokens.map((t) => t.symbol);
+                    // If there's more than 1 token going out or more than 1 token coming in, you could treat it as multi-swap
+                    const multiOut = outSymbols.length > 1;
+                    const multiIn = inSymbols.length > 1;
+                    const isMultiSwap = (type === "swap") && (multiOut || multiIn);
+                    if (isMultiSwap) {
+                      type = "swap"; // or "multi-swap" if you prefer
                     }
       
-                    // Step D) Calculate totalUsdValue
+                    // *** Summarize
                     const sumOut = tokenDetails.outTokens.reduce((acc, t) => acc + t.usdValue, 0);
                     const sumIn = tokenDetails.inTokens.reduce((acc, t) => acc + t.usdValue, 0);
                     const totalUsdValue = Math.max(sumOut, sumIn);
-
-                    if(totalUsdValue < 5000) continue
       
-                    // Step E) Build summary
+                    if(totalUsdValue < 5000) continue
+
                     let summary = "";
                     if (type === "mint") {
-                      const minted = tokenDetails.inTokens
-                        .map(
-                          (t) => `${t.amount.toFixed(4)} ${t.symbol} ($${t.usdValue.toFixed(2)})`
-                        )
+                      const mintedStr = tokenDetails.inTokens
+                        .map((t) => `${t.amount.toFixed(4)} ${t.symbol} ($${t.usdValue.toFixed(2)})`)
                         .join(" + ");
-                      summary = `Minted ${minted}`;
-                    } else if (type === "swap" || type === "multi-swap") {
+                      summary = `Minted ${mintedStr}`;
+                    } else if (type === "swap") {
                       const outStr = tokenDetails.outTokens
-                        .map(
-                          (t) => `${t.amount.toFixed(4)} ${t.symbol} ($${t.usdValue.toFixed(2)})`
-                        )
+                        .map((t) => `${t.amount.toFixed(4)} ${t.symbol} ($${t.usdValue.toFixed(2)})`)
                         .join(" + ");
                       const inStr = tokenDetails.inTokens
-                        .map(
-                          (t) => `${t.amount.toFixed(4)} ${t.symbol} ($${t.usdValue.toFixed(2)})`
-                        )
+                        .map((t) => `${t.amount.toFixed(4)} ${t.symbol} ($${t.usdValue.toFixed(2)})`)
                         .join(" + ");
                       summary = `Swapped ${outStr} for ${inStr}`;
-                      if (type === "multi-swap") {
-                        summary = `[MULTI] ${summary}`;
-                      }
                     } else if (type === "send") {
                       const outStr = tokenDetails.outTokens
-                        .map(
-                          (t) => `${t.amount.toFixed(4)} ${t.symbol} ($${t.usdValue.toFixed(2)})`
-                        )
+                        .map((t) => `${t.amount.toFixed(4)} ${t.symbol} ($${t.usdValue.toFixed(2)})`)
                         .join(" + ");
                       summary = `Sent ${outStr}`;
                     } else if (type === "receive") {
                       const inStr = tokenDetails.inTokens
-                        .map(
-                          (t) => `${t.amount.toFixed(4)} ${t.symbol} ($${t.usdValue.toFixed(2)})`
-                        )
+                        .map((t) => `${t.amount.toFixed(4)} ${t.symbol} ($${t.usdValue.toFixed(2)})`)
                         .join(" + ");
                       summary = `Received ${inStr}`;
                     }
@@ -660,12 +617,26 @@ export class Autoload { // This is the class that starts the server
                       finalToken: tokenDetails.finalToken,
                     });
       
-                    // Step F) Save to DB if not present
+                    // 4) Save to DB if not present
                     const existing = await EtherTransaction.findOne({ hash: tx.hash });
                     if (!existing) {
-                      // Build the final symbols for saving:
-                      const allOutSymbols = tokenDetails.outTokens.map(t => t.symbol);
-                      const allInSymbols = tokenDetails.inTokens.map(t => t.symbol);
+                      // Build the comma-separated outSymbol and inSymbol
+                      const outSymbolsStr = outSymbols.join(", ");
+                      const inSymbolsStr = inSymbols.join(", ");
+      
+                      // Decide which symbol to use for tokenSymbol
+                      // e.g. if there's only 1 out symbol, use it, else join them
+                      const tokenSymbol = (outSymbols.length > 0)
+                        ? outSymbols.join(", ")
+                        : (inSymbols.length > 0 ? inSymbols.join(", ") : "UNKNOWN");
+      
+                      // Similarly for tokenSymbol2, we might prefer "finalToken" or inSymbols
+                      let tokenSymbol2 = "UNKNOWN";
+                      if (tokenDetails.finalToken?.symbol) {
+                        tokenSymbol2 = tokenDetails.finalToken.symbol;
+                      } else if (inSymbols.length) {
+                        tokenSymbol2 = inSymbols.join(", ");
+                      }
       
                       await EtherTransaction.create({
                         hash: tx.hash,
@@ -675,31 +646,23 @@ export class Autoload { // This is the class that starts the server
                         transactionIndex: tx.transactionIndex,
                         from: tx.from,
                         to: tx.to,
-                        value: Number(tx.value), // raw in Wei from Etherscan tokenTx
+                        // Etherscan's tokenTx "value" is typically the ERC-20 value in Wei if it's a token TX
+                        // For a pure ETH tx, we rely on the top-level "realValueETH" from ethplorer
+                        // We'll store Etherscan's 'value' as raw anyway
+                        value: Number(tx.value), 
                         gas: tx.gas,
                         gasPrice: tx.gasPrice,
                         isError: tx.isError,
-                        input: tx.input || "deprecated",
+                        input: tx.input,
                         contractAddress: tx.contractAddress,
                         cumulativeGasUsed: tx.cumulativeGasUsed,
                         gasUsed: tx.gasUsed,
                         confirmations: tx.confirmations,
       
                         // Original fields
-                        tokenName: tx.tokenName,
-                        // If only 1 distinct out token, store it, else "MULTIPLE" or "UNKNOWN"
-                        tokenSymbol:
-                          allOutSymbols.length === 1
-                            ? allOutSymbols[0]
-                            : (allOutSymbols.length > 1 ? "MULTIPLE" : "UNKNOWN"),
-                        // For "second" token, try finalToken or fallback to single inSymbol
-                        tokenSymbol2:
-                          tokenDetails.finalToken?.symbol ||
-                          (
-                            allInSymbols.length === 1
-                              ? allInSymbols[0]
-                              : (allInSymbols.length > 1 ? "MULTIPLE" : "UNKNOWN")
-                          ),
+                        tokenName: tx.tokenName || "",
+                        tokenSymbol,
+                        tokenSymbol2,
                         tokenDecimal: Number(tx.tokenDecimal) || 18,
       
                         // Enhanced tracking
@@ -713,9 +676,6 @@ export class Autoload { // This is the class that starts the server
                         timestamp: new Date(parseInt(tx.timeStamp) * 1000),
                         singleTransaction:
                           tokenDetails.outTokens.length <= 1 && tokenDetails.inTokens.length <= 1,
-      
-                        // Track multi-swap if you want
-                        isMultiSwap
                       });
                     }
       
@@ -743,6 +703,7 @@ export class Autoload { // This is the class that starts the server
           Autoload.fetchAndUpdateTransactions();
         }, 30000);
       }
+      
       
 
     
