@@ -320,8 +320,13 @@ export class Autoload { // This is the class that starts the server
             const currentTime = new Date();
             // Last 3 days:
             const threeDaysAgo = Math.floor(
-              (currentTime.getTime() - 3 * 24 * 60 * 60 * 1000) / 1000
+                (currentTime.getTime() - 7 * 24 * 60 * 60 * 1000) / 1000
             );
+
+            const weekAgo = Math.floor(
+                (currentTime.getTime() - 7 * 24 * 60 * 60 * 1000) / 1000
+            );
+
       
             for (const wallet of wallets) {
               for (const address of wallet.wallets) {
@@ -599,6 +604,8 @@ export class Autoload { // This is the class that starts the server
                     const sumOut = tokenDetails.outTokens.reduce((acc, t) => acc + t.usdValue, 0);
                     const sumIn = tokenDetails.inTokens.reduce((acc, t) => acc + t.usdValue, 0);
                     const totalUsdValue = Math.max(sumOut, sumIn);
+
+                    if(totalUsdValue < 5000) continue
       
                     // Step E) Build summary
                     let summary = "";
