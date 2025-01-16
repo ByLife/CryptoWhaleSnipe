@@ -18,6 +18,7 @@ import SolTransaction from "../database/models/SolTransaction";
 import axios from "axios";
 import BnbTransaction from "../database/models/BnbTransaction";
 import BnbWallet from "../database/models/BnbWallet";
+import { buildSummary, classifyTransaction, delay, fetchEtherscanTxs, fetchEthplorerData, parseTokenOperations, storeTransactionIfNeeded } from "./utils/EthTransactionHelpers";
 
 dotenv.config()
 
@@ -293,397 +294,132 @@ export class Autoload { // This is the class that starts the server
     }
     
     public static async fetchAndUpdateTransactions() {
-        const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-      
-        const processTransactions = async () => {
-          try {
-            const wallets = await EthereumWallet.find();
-            const currentTime = new Date();
-            // Last 3 hours:
-            const threeDaysAgo = Math.floor(
-                (currentTime.getTime() - 3 * 60 * 60 * 1000) / 1000
-                );
-      
-            for (const wallet of wallets) {
-              for (const address of wallet.wallets) {
-                console.log(`\n[FETCH] Transactions for ${wallet.username} - ${address}`);
-                await delay(200);
-      
-                // 1) Fetch from Etherscan's tokenTx endpoint (ERC-20 logs)
-                const url =
-                  `https://api.etherscan.io/api` +
-                  `?module=account&action=tokentx&address=${address}` +
-                  `&startblock=0&endblock=99999999&sort=desc` +
-                  `&apikey=${Autoload.ETH_APIKEY}`;
-      
-                let response;
+      const processTransactions = async () => {
+        try {
+          const wallets = await EthereumWallet.find();
+          const currentTime = new Date();
+          // Last 3 hours:
+          const threeHoursAgo = Math.floor(
+            (currentTime.getTime() - 3 * 24 * 60 * 60 * 1000) / 1000
+          );
+
+          const threeDaysAgo = Math.floor(
+            (currentTime.getTime() - 3 * 24 * 60 * 60 * 1000) / 1000
+          );
+  
+          for (const wallet of wallets) {
+            for (const address of wallet.wallets) {
+              console.log(`\n[FETCH] Transactions for ${wallet.username} - ${address}`);
+              await delay(200);
+  
+              // 1) Fetch from Etherscan
+              let transactions = await fetchEtherscanTxs(address, Autoload.ETH_APIKEY || "");
+  
+              // Filter last 3 hours
+              transactions = transactions
+                .filter((tx: any) => parseInt(tx.timeStamp) >= threeHoursAgo)
+                .sort((a: any, b: any) => parseInt(b.timeStamp) - parseInt(a.timeStamp));
+  
+              console.log(`=> After filtering 3 hours, count: ${transactions.length}`);
+  
+              const processedTxs = new Set<string>();
+              let index = 0;
+  
+              for (const tx of transactions) {
+                index++;
                 try {
-                  response = await axios.get(url);
-                } catch (err) {
-                  console.error(`Error fetching Etherscan tokenTx for ${address}`, err);
-                  continue;
-                }
-
-                if (!response?.data?.result) {
-                  console.log(`No tokenTx results found for ${address}`);
-                  continue;
-                }
-      
-                let transactions: any[] = response.data.result;
-                // Filter last 3 days
-                transactions = transactions
-                  .filter((tx) => parseInt(tx.timeStamp) >= threeDaysAgo)
-                  .sort((a, b) => parseInt(b.timeStamp) - parseInt(a.timeStamp));
-      
-                console.log(`=> After filtering 3 days, count: ${transactions.length}`);
-      
-                const processedTxs = new Set<string>();
-                let index = 0;
-      
-                for (const tx of transactions) {
-                  index++;
-                  try {
-                    // Avoid duplicates by tx.hash
-                    if (processedTxs.has(tx.hash)) continue;
-                    processedTxs.add(tx.hash);
-      
-                    console.log(`[${index}/${transactions.length}] Checking tx: ${tx.hash}`);
-                    await delay(300); // Rate limit
-      
-                    // 2) Fetch advanced info from Ethplorer
-                    const ethplorerUrl = `https://api.ethplorer.io/getTxInfo/${tx.hash}?apiKey=${Autoload.ETHPLORER_APIKEY}`;
-                    let ethplorerResponse;
-                    try {
-                      ethplorerResponse = await axios.get(ethplorerUrl);
-                    } catch (err) {
-                      console.error(`Failed Ethplorer for tx ${tx.hash}`, err);
-                      continue;
-                    }
-      
-                    if (!ethplorerResponse?.data) {
-                      console.log(`No Ethplorer data for tx ${tx.hash}, skipping...`);
-                      continue;
-                    }
-      
-                    const txData = ethplorerResponse.data;
-      
-                    // read the "real" from/to/value from the top-level of Ethplorer
-                    const realFrom = (txData.from || "").toLowerCase();
-                    const realTo = (txData.to || "").toLowerCase();
-      
-                    // IMPORTANT: Ethplorer uses 'value' as a floating number (ETH), not Wei
-                    // if logs=[] and there's a 'value', it's a pure ETH tx
-                    // e.g. "value": 37.51886823 means 37.51886823 ETH
-                    const realValueETH = parseFloat(txData.value || "0");
-      
-                    const userAddr = address.toLowerCase();
-                    const userIsSender = (realFrom === userAddr);
-                    let spentEthAmount = 0; // track how much ETH the user spent
-      
-                    // We'll parse the "operations" array for ERC-20 logs
-                    const operations = txData.operations || [];
-      
-                    // We'll build up a map of tokens => aggregated totals
-                    const tokenOperations = new Map<string, {
-                      symbol: string;
-                      decimals: number;
-                      price: number;
-                      totalOut: number;
-                      totalIn: number;
-                      operations: any[];
-                    }>();
-      
-                    // --- 1) If top-level user is sender and there's a top-level ETH value
-                    if (userIsSender && realValueETH > 0) {
-                      spentEthAmount = realValueETH;
-                      // create an entry for "ETH"
-                      const fallbackEthPrice = 1700; // or your price feed
-                      tokenOperations.set("0xETH_NATIVE", {
-                        symbol: "ETH",
-                        decimals: 18,
-                        price: fallbackEthPrice,
-                        totalOut: realValueETH,
-                        totalIn: 0,
-                        operations: []
-                      });
-                    }
-      
-                    // --- 2) If top-level user is receiver and there's a top-level ETH value
-                    if (!userIsSender && realTo === userAddr && realValueETH > 0) {
-                      // user is receiving ETH
-                      const fallbackEthPrice = 1700;
-                      tokenOperations.set("0xETH_NATIVE", {
-                        symbol: "ETH",
-                        decimals: 18,
-                        price: fallbackEthPrice,
-                        totalOut: 0,
-                        totalIn: realValueETH,
-                        operations: []
-                      });
-                    }
-      
-                    // *** Now parse the operations array for ERC-20 in/out
-                    for (const op of operations) {
-                      const tokenAddr = op.tokenInfo?.address?.toLowerCase();
-                      if (!tokenAddr) continue;
-      
-                      if (!tokenOperations.has(tokenAddr)) {
-                        tokenOperations.set(tokenAddr, {
-                          symbol: op.tokenInfo?.symbol || "UNKNOWN",
-                          decimals: op.tokenInfo?.decimals
-                            ? Number(op.tokenInfo.decimals)
-                            : 18,
-                          price: op.tokenInfo?.price?.rate || 0,
-                          totalOut: 0,
-                          totalIn: 0,
-                          operations: []
-                        });
-                      }
-      
-                      const tOp = tokenOperations.get(tokenAddr)!;
-                      tOp.operations.push(op);
-      
-                      // Convert value from raw string to numeric, using decimals
-                      const numericValue = parseFloat(op.value) / (10 ** tOp.decimals);
-      
-                      // If op.from is user => out
-                      if ((op.from || "").toLowerCase() === userAddr) {
-                        tOp.totalOut += numericValue;
-                      }
-                      // If op.to is user => in
-                      if ((op.to || "").toLowerCase() === userAddr) {
-                        tOp.totalIn += numericValue;
-                      }
-                    }
-      
-                    // 3) Build final classification and details
-                    let type = "unknown";
-                    const tokenDetails: {
-                      outTokens: { symbol: string; amount: number; usdValue: number }[];
-                      inTokens: { symbol: string; amount: number; usdValue: number }[];
-                      finalToken: null | { symbol: string; amount: number; usdValue: number };
-                    } = {
-                      outTokens: [],
-                      inTokens: [],
-                      finalToken: null
-                    };
-      
-                    // Summarize outTokens/inTokens from the aggregated tokenOperations
-                    for (const [addr, data] of tokenOperations) {
-                      if (data.totalOut > 0) {
-                        tokenDetails.outTokens.push({
-                          symbol: data.symbol,
-                          amount: data.totalOut,
-                          usdValue: data.totalOut * data.price
-                        });
-                      }
-                      if (data.totalIn > 0) {
-                        tokenDetails.inTokens.push({
-                          symbol: data.symbol,
-                          amount: data.totalIn,
-                          usdValue: data.totalIn * data.price
-                        });
-                      }
-                    }
-      
-                    // *** Identify finalToken (the last token credited to user).
-                    // We'll do a simple approach: look for the last operation that credited the user.
-                    const lastIncomingOp = [...operations].reverse().find(
-                      (op) => (op.to || "").toLowerCase() === userAddr
-                    );
-                    if (lastIncomingOp) {
-                      const finalAddr = (lastIncomingOp.tokenInfo?.address || "").toLowerCase();
-                      if (finalAddr && tokenOperations.has(finalAddr)) {
-                        const finalData = tokenOperations.get(finalAddr)!;
-                        const finalAmt =
-                          parseFloat(lastIncomingOp.value) / (10 ** finalData.decimals);
-                        tokenDetails.finalToken = {
-                          symbol: finalData.symbol,
-                          amount: finalAmt,
-                          usdValue: finalAmt * finalData.price
-                        };
-                      }
-                    }
-      
-                    // *** Classification Logic
-                    // Check if user minted something:
-                    let fromIsZero =
-                      operations[0] &&
-                      (!operations[0].from ||
-                        operations[0].from === "0x0000000000000000000000000000000000000000");
-      
-                    if (fromIsZero && (operations[0]?.to || "").toLowerCase() === userAddr) {
-                      type = "mint";
-                    } else {
-                      // "hasOut" means user has at least one outToken
-                      const hasOut = tokenDetails.outTokens.length > 0;
-                      const hasIn = tokenDetails.inTokens.length > 0;
-      
-                      if (hasOut && hasIn) {
-                        type = "swap";
-                      } else if (hasOut) {
-                        type = "send";
-                      } else if (hasIn) {
-                        type = "receive";
-                      }
-                    }
-      
-                    // *** If user is top-level sender with ETH but ended up "receive" or "send",
-                    // override to "swap" if they got a different token
-                    if (
-                      userIsSender &&
-                      spentEthAmount > 0 &&
-                      (type === "receive" || type === "send") &&
-                      tokenDetails.inTokens.some((t) => t.symbol !== "ETH")
-                    ) {
-                      type = "swap";
-                    }
-      
-                    // *** Possibly detect multiple tokens in/out => "multi-swap"
-                    // But you requested to list all tokens, not just "MULTIPLE"
-                    // We'll store them in a comma separated list
-                    const outSymbols = tokenDetails.outTokens.map((t) => t.symbol);
-                    const inSymbols = tokenDetails.inTokens.map((t) => t.symbol);
-                    // If there's more than 1 token going out or more than 1 token coming in, you could treat it as multi-swap
-                    const multiOut = outSymbols.length > 1;
-                    const multiIn = inSymbols.length > 1;
-                    const isMultiSwap = (type === "swap") && (multiOut || multiIn);
-                    if (isMultiSwap) {
-                      type = "swap"; // or "multi-swap" if you prefer
-                    }
-      
-                    // *** Summarize
-                    const sumOut = tokenDetails.outTokens.reduce((acc, t) => acc + t.usdValue, 0);
-                    const sumIn = tokenDetails.inTokens.reduce((acc, t) => acc + t.usdValue, 0);
-                    const totalUsdValue = Math.max(sumOut, sumIn);
-      
-                    if(totalUsdValue < 5000) continue
-
-                    let summary = "";
-                    if (type === "mint") {
-                      const mintedStr = tokenDetails.inTokens
-                        .map((t) => `${t.amount.toFixed(4)} ${t.symbol} ($${t.usdValue.toFixed(2)})`)
-                        .join(" + ");
-                      summary = `Minted ${mintedStr}`;
-                    } else if (type === "swap") {
-                      const outStr = tokenDetails.outTokens
-                        .map((t) => `${t.amount.toFixed(4)} ${t.symbol} ($${t.usdValue.toFixed(2)})`)
-                        .join(" + ");
-                      const inStr = tokenDetails.inTokens
-                        .map((t) => `${t.amount.toFixed(4)} ${t.symbol} ($${t.usdValue.toFixed(2)})`)
-                        .join(" + ");
-                      summary = `Swapped ${outStr} for ${inStr}`;
-                    } else if (type === "send") {
-                      const outStr = tokenDetails.outTokens
-                        .map((t) => `${t.amount.toFixed(4)} ${t.symbol} ($${t.usdValue.toFixed(2)})`)
-                        .join(" + ");
-                      summary = `Sent ${outStr}`;
-                    } else if (type === "receive") {
-                      const inStr = tokenDetails.inTokens
-                        .map((t) => `${t.amount.toFixed(4)} ${t.symbol} ($${t.usdValue.toFixed(2)})`)
-                        .join(" + ");
-                      summary = `Received ${inStr}`;
-                    }
-      
-                    console.log("[ANALYSIS]", {
-                      hash: tx.hash,
-                      realFrom,
-                      realTo,
-                      userIsSender,
-                      spentEthAmount,
-                      type,
-                      summary,
-                      outTokens: tokenDetails.outTokens,
-                      inTokens: tokenDetails.inTokens,
-                      finalToken: tokenDetails.finalToken,
-                    });
-      
-                    // 4) Save to DB if not present
-                    const existing = await EtherTransaction.findOne({ hash: tx.hash });
-                    if (!existing) {
-                      // Build the comma-separated outSymbol and inSymbol
-                      const outSymbolsStr = outSymbols.join(", ");
-                      const inSymbolsStr = inSymbols.join(", ");
-      
-                      // Decide which symbol to use for tokenSymbol
-                      // e.g. if there's only 1 out symbol, use it, else join them
-                      const tokenSymbol = (outSymbols.length > 0)
-                        ? outSymbols.join(", ")
-                        : (inSymbols.length > 0 ? inSymbols.join(", ") : "UNKNOWN");
-      
-                      // Similarly for tokenSymbol2, we might prefer "finalToken" or inSymbols
-                      let tokenSymbol2 = "UNKNOWN";
-                      if (tokenDetails.finalToken?.symbol) {
-                        tokenSymbol2 = tokenDetails.finalToken.symbol;
-                      } else if (inSymbols.length) {
-                        tokenSymbol2 = inSymbols.join(", ");
-                      }
-      
-                      await EtherTransaction.create({
-                        hash: tx.hash,
-                        blockNumber: tx.blockNumber,
-                        timeStamp: tx.timeStamp,
-                        nonce: tx.nonce,
-                        transactionIndex: tx.transactionIndex,
-                        from: tx.from,
-                        to: tx.to,
-                        // Etherscan's tokenTx "value" is typically the ERC-20 value in Wei if it's a token TX
-                        // For a pure ETH tx, we rely on the top-level "realValueETH" from ethplorer
-                        // We'll store Etherscan's 'value' as raw anyway
-                        value: Number(tx.value), 
-                        gas: tx.gas,
-                        gasPrice: tx.gasPrice,
-                        isError: tx.isError,
-                        input: tx.input,
-                        contractAddress: tx.contractAddress,
-                        cumulativeGasUsed: tx.cumulativeGasUsed,
-                        gasUsed: tx.gasUsed,
-                        confirmations: tx.confirmations,
-      
-                        // Original fields
-                        tokenName: tx.tokenName || "",
-                        tokenSymbol,
-                        tokenSymbol2,
-                        tokenDecimal: Number(tx.tokenDecimal) || 18,
-      
-                        // Enhanced tracking
-                        type,
-                        summary,
-                        outTokens: tokenDetails.outTokens,
-                        inTokens: tokenDetails.inTokens,
-                        finalToken: tokenDetails.finalToken,
-                        totalUsdValue,
-                        usdPrice: totalUsdValue,
-                        timestamp: new Date(parseInt(tx.timeStamp) * 1000),
-                        singleTransaction:
-                          tokenDetails.outTokens.length <= 1 && tokenDetails.inTokens.length <= 1,
-                      });
-                    }
-      
-                    // Update the wallet
-                    wallet.lastTransaction = new Date();
-                    await wallet.save();
-                  } catch (err) {
-                    console.error(`Error processing transaction ${tx.hash}:`, err);
-                    Logger.error(`Error processing tx ${tx.hash}: ${String(err)}`);
+                  if (processedTxs.has(tx.hash)) continue;
+                  processedTxs.add(tx.hash);
+  
+                  console.log(`[${index}/${transactions.length}] Checking tx: ${tx.hash}`);
+                  await delay(300);
+  
+                  // 2) Fetch advanced info from Ethplorer
+                  const txData = await fetchEthplorerData(tx.hash, Autoload.ETHPLORER_APIKEY  || "");
+                  if (!txData) {
+                    console.log(`No Ethplorer data for tx ${tx.hash}, skipping...`);
+                    continue;
                   }
+  
+                  // Basic fields
+                  const realFrom = (txData.from || "").toLowerCase();
+                  const realTo = (txData.to || "").toLowerCase();
+                  const realValueETH = parseFloat(txData.value || "0"); // in ETH, not Wei
+                  const userAddr = address.toLowerCase();
+  
+                  // 3) Parse operations (ERC-20, plus top-level ETH if any)
+                  const { tokenOperations, spentEthAmount } = parseTokenOperations(
+                    txData,
+                    userAddr,
+                    realFrom,
+                    realTo,
+                    realValueETH
+                  );
+  
+                  // 4) Classify
+                  const classification = classifyTransaction(
+                    tokenOperations,
+                    txData.operations || [],
+                    userAddr,
+                    spentEthAmount,
+                    realFrom
+                  );
+                  const {
+                    type,
+                    tokenDetails,
+                    outSymbols,
+                    inSymbols,
+                    totalUsdValue,
+                    // New fields (the chosen single token's USD + marketCap)
+                    chosenTokenUsdValue,
+                    chosenTokenMarketCap
+                  } = classification;
+  
+                  // If under $5,000, skip (your custom cutoff)
+                  if (totalUsdValue < 5000) {
+                    continue;
+                  }
+  
+                  // Build summary
+                  const summary = buildSummary(type, tokenDetails);
+  
+                  // Store in DB if not exist
+                  await storeTransactionIfNeeded(
+                    tx,
+                    tokenDetails,
+                    type,
+                    summary,
+                    totalUsdValue,
+                    outSymbols,
+                    inSymbols,
+                    chosenTokenUsdValue,      
+                    chosenTokenMarketCap      
+                  );
+  
+                  // Update wallet
+                  wallet.lastTransaction = new Date();
+                  await wallet.save();
+                } catch (err) {
+                  console.error(`Error processing transaction ${tx.hash}:`, err);
+                  Logger.error(`Error processing tx ${tx.hash}: ${String(err)}`);
                 }
               }
             }
-          } catch (error) {
-            console.error("Main process error:", error);
-            Logger.error(`Fetch Error: ${String(error)}`);
           }
-        };
-      
-        // Initial call
-        await processTransactions();
-      
-        // Schedule next run (example every 30 sec)
-        setTimeout(() => {
-          Autoload.fetchAndUpdateTransactions();
-        }, 30000);
-      }
+        } catch (error) {
+          console.error("Main process error:", error);
+          Logger.error(`Fetch Error: ${String(error)}`);
+        }
+      };
+  
+      // Initial call
+      await processTransactions();
+  
+      // Schedule next run
+      setTimeout(() => {
+        Autoload.fetchAndUpdateTransactions();
+      }, 30000);
+    }
       
       
 

@@ -75,7 +75,14 @@ export default {
                     influencer: wallet.influencer,
                     image: wallet.image,
                     nickname: wallet.nickname,
-                    summary: tx.summary // Adding the transaction summary for better context
+                    summary: tx.summary,
+                    methodId: tx.methodId,
+                    functionName: tx.functionName,
+                    marketCap: tx.marketCap,
+                    singleTransaction: tx.singleTransaction,
+                    singleTokenUsdValue: tx.singleTokenUsdValue,
+                    singleTokenMarketCap: tx.singleTokenMarketCap,
+                    contractAddress: tx.contractAddress,
                 });
             }
 

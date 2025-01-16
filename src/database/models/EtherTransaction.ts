@@ -41,6 +41,8 @@ export interface EtherTransaction {
     finalToken?: TokenDetail | null;
     totalUsdValue?: number;
     timestamp?: Date;
+    singleTokenUsdValue?: number;
+    singleTokenMarketCap?: number;
 }
 
 const TokenDetailSchema = new Schema({
@@ -76,6 +78,8 @@ const EtherTransactionSchema = new Schema({
     tokenSymbol2: String,
     marketCap: Number,
     singleTransaction: Boolean,
+    singleTokenUsdValue: Number,
+    singleTokenMarketCap: Number,
 
     // New
     summary: String,
