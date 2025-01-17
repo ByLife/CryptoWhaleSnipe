@@ -8,14 +8,8 @@ interface SolanaRecentTx {
   username: string;
   wallet: string;
   signature: string;
-  blockTime: number;
+  timeStamp: number;
   type?: string;
-  swaps: {
-    tokenSymbol: string;
-    amountChange: number;
-    usdValue?: number;
-  }[];
-  totalUsdValue: number;
   influencer: boolean;
   image: string | null;
   nickname: string | null;
@@ -66,9 +60,7 @@ export default {
           username: wallet.username,
           wallet: wallet.wallets[0],
           signature: tx.signature,
-          blockTime: tx.blockTime,
-          swaps: tx.swaps || [],        
-          totalUsdValue,
+          timeStamp: tx.blockTime,
           type: tx.type,
           influencer: wallet.influencer,
           image: wallet.image,
