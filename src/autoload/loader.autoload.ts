@@ -167,7 +167,7 @@ export class Autoload { // This is the class that starts the server
             for (const wallet of wallets) {
               for (const address of wallet.wallets) {
                 console.log(`\n[FETCH SOL] SWAPS for ${wallet.username} - ${address}`);
-                await processSolSwaps(address);
+                await processSolSwaps(address, 1000); // 1000 for 1000$ min value
               }
             }
           } catch (error) {

@@ -100,7 +100,7 @@ async function fetchFromHelius(url: string) {
  *  - skip if signature already in DB
  *  - store outTokens, inTokens, totalUsdValue
  *******************************************/
-export async function processSolSwaps(address: string) {
+export async function processSolSwaps(address: string, maxPrice: number) {
   try {
     // 1) Rate-limited fetch from Helius
     const url = `https://api.helius.xyz/v0/addresses/${address}/transactions?api-key=${HELIUS_API_KEY}`;
@@ -194,7 +194,7 @@ export async function processSolSwaps(address: string) {
         }
 
         // skip if < 1000
-        if (totalUsdValue < 1000) {
+        if (totalUsdValue < maxPrice) {
           console.log(`=> totalUsdValue=$${totalUsdValue.toFixed(2)} < 1000, skipping`);
           continue;
         }
