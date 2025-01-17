@@ -300,11 +300,7 @@ export class Autoload { // This is the class that starts the server
           const currentTime = new Date();
           // Last 3 hours:
           const threeHoursAgo = Math.floor(
-            (currentTime.getTime() - 3 * 24 * 60 * 60 * 1000) / 1000
-          );
-
-          const threeDaysAgo = Math.floor(
-            (currentTime.getTime() - 3 * 24 * 60 * 60 * 1000) / 1000
+            (currentTime.getTime() - 3 * 60 * 60 * 1000) / 1000
           );
   
           for (const wallet of wallets) {
