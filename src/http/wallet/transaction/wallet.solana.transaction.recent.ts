@@ -16,8 +16,8 @@ interface SolanaRecentTx {
   tokenSymbol: string;  
   tokenSymbol2: string;  
   usdPrice: number;
-  contactAddress: string;
-  contactAddress2: string;
+  contractAddress: string;
+  contractAddress2: string;
 }
 
 export default {
@@ -67,8 +67,8 @@ export default {
           influencer: wallet.influencer,
           image: wallet.image,
           nickname: wallet.nickname || null,
-          contactAddress: tx.from || "",
-          contactAddress2: tx.to || "",
+          contractAddress: tx.from || "",
+          contractAddress2: tx.to || "",
 
           tokenSymbol: inSymbols,
           tokenSymbol2: outSymbols,
