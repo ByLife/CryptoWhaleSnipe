@@ -207,6 +207,8 @@ export async function processSolSwaps(address: string, maxPrice: number) {
         }
 
         // insert
+
+
         await SolTransactionModel.create({
           signature: tx.signature,
           blockTime: tx.timestamp,
@@ -216,6 +218,9 @@ export async function processSolSwaps(address: string, maxPrice: number) {
           outTokens,
           inTokens,
           totalUsdValue,
+
+          contractAddress: outputMint,
+        
 
           from: address,
           to: address,

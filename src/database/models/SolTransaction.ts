@@ -25,6 +25,8 @@ export interface SolanaTransaction {
   from?: string;
   to?: string;
   type?: string;
+
+  contractAddress?: string;
 }
 
 const SolTokenDetailSchema = new Schema(
@@ -49,6 +51,8 @@ const SolanaTransactionSchema = new Schema({
   from: String,
   to: String,
   type: String,
+
+  contractAddress: String,
 },{
   timestamps: true
 });
