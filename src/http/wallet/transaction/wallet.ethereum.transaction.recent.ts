@@ -14,10 +14,10 @@ export default {
             if(!req.token) throw "Unauthorized access, missing 'token' in request header"
             if(!await AccessBearer.findOne({token: req.token})) throw "Unauthorized access"
 
-            const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+            const threeHoursAgo = new Date(Date.now() - 3 * 60 * 60 * 1000);
             const transactions = await EtherTransaction.find({
                 timestamp: {
-                    $gte: oneDayAgo
+                    $gte: threeHoursAgo
                 }
             }).lean();
 

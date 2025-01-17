@@ -24,7 +24,7 @@ let lastHeliusCall = 0;
 
 // Auto-fetch SOL price from CoinGecko every 1 min
 const SOL_PRICE_FETCH_INTERVAL = 60_000;
-let cachedSolPrice = 20;   // fallback
+let cachedSolPrice = 200;   // fallback
 let lastSolPriceFetch = 0;
 
 /*******************************************

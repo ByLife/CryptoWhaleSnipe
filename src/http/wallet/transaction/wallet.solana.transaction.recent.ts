@@ -2,6 +2,7 @@ import express from "express";
 import SolTransaction from "../../../database/models/SolTransaction";
 import SolanaWallet from "../../../database/models/SolWallet";
 import AccessBearer from "../../../database/models/AccessBearer";
+import { cp } from "fs";
 
 
 interface SolanaRecentTx {
@@ -35,10 +36,10 @@ export default {
       }
 
       // blockTime is in seconds, so we do numeric comparison
-      const oneDayAgo = Math.floor((Date.now() - 24 * 60 * 60 * 1000) / 1000);
+      const threeHoursAgo = Math.floor((Date.now() - 3 * 60 * 60 * 1000) / 1000);
 
       const transactions = await SolTransaction.find({
-        blockTime: { $gte: oneDayAgo }
+        blockTime: { $gte: threeHoursAgo }
       }).lean();
 
       const results: SolanaRecentTx[] = [];
