@@ -7,7 +7,7 @@ import AccessBearer from "../../../database/models/AccessBearer";
 interface SolanaRecentTx {
   username: string;
   wallet: string;
-  signature: string;
+  hash: string;
   timeStamp: number;
   type?: string;
   influencer: boolean;
@@ -61,7 +61,7 @@ export default {
         results.push({
           username: wallet.username,
           wallet: wallet.wallets[0],
-          signature: tx.signature,
+          hash: tx.signature,
           timeStamp: tx.blockTime,
           type: tx.type,
           influencer: wallet.influencer,
