@@ -2,7 +2,6 @@
 
 import express from "express";
 import EthereumWallet from "../../database/models/EtherWallet";
-import BnbWallet from "../../database/models/BnbWallet";
 import SolanaWallet from "../../database/models/SolWallet";
 import AccessBearer from "../../database/models/AccessBearer";
 
@@ -52,21 +51,6 @@ export default {
                     }
                     break;
 
-                case 'bnb':
-                    wallet = await BnbWallet.findOne({username: req.body.username});
-                    if(wallet) {
-                        wallet.wallets = [...new Set([...wallet.wallets, ...wallets])];
-                        savedWallet = await wallet.save();
-                    } else {
-                        savedWallet = await new BnbWallet({
-                            username: req.body.username,
-                            wallets: wallets,
-                            influencer: req.body.influencer,
-                            image,
-                            nickname
-                        }).save();
-                    }
-                    break;
 
                 case 'solana':
                     wallet = await SolanaWallet.findOne({username: req.body.username});
