@@ -54,6 +54,6 @@ const SolanaTransactionSchema = new Schema({
 });
 
 export default mongoose.model<SolanaTransaction & Document>(
-  "SolTransaction",
+  "SolanaTransaction",
   SolanaTransactionSchema
 );
