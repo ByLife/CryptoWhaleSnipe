@@ -2,15 +2,26 @@
 
 import mongoose, { Document, Schema } from "mongoose";
 
+interface SolTokenDetail {
+  symbol: string;
+  amount: number;
+  usdValue?: number;
+}
+
 export interface SolanaTransaction {
   signature: string;
   blockTime: number;
   slot: number;
-  swaps: {
+  swaps?: {
     tokenSymbol: string;
     amountChange: number;
     usdValue?: number;
   }[];
+
+  outTokens?: SolTokenDetail[];
+  inTokens?: SolTokenDetail[];
+  finalToken?: SolTokenDetail;
+  totalUsdValue?: number;
   from?: string;
   to?: string;
   type?: string;
@@ -32,17 +43,17 @@ const SolanaTransactionSchema = new Schema({
 
   outTokens: [SolTokenDetailSchema],
   inTokens: [SolTokenDetailSchema],
-  
-  finalToken: SolTokenDetailSchema,  
+  finalToken: SolTokenDetailSchema,
   totalUsdValue: Number,
-  
+
   from: String,
   to: String,
   type: String,
-}, {
+},{
   timestamps: true
 });
+
 export default mongoose.model<SolanaTransaction & Document>(
-  "SolanaTransaction",
+  "SolTransaction",
   SolanaTransactionSchema
 );
