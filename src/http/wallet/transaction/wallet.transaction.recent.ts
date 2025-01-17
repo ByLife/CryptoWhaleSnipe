@@ -21,7 +21,7 @@ export default {
                 }
             }).lean();
 
-            const results = [];
+            const results: any = [];
             for (const tx of transactions) {
                 // Find wallet that matches either from or to address
                 const wallet = await EthereumWallet.findOne({

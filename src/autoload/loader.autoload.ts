@@ -17,6 +17,7 @@ import SolanaWallet from "../database/models/SolWallet";
 import SolTransaction from "../database/models/SolTransaction";
 import axios from "axios";
 import { buildSummary, classifyTransaction, delay, fetchEtherscanTxs, fetchEthplorerData, parseTokenOperations, storeTransactionIfNeeded } from "./utils/EthTransactionHelpers";
+import { processSolSwaps } from "./utils/SolanaTransactionHelpers";
 
 dotenv.config()
 
@@ -37,8 +38,13 @@ export class Autoload { // This is the class that starts the server
     static socket: Socket.Server | null = Boolean(process.env.WEBSOCKETS_API) == true ? new Socket.Server(process.env.SOCKET_PORT ? Number(process.env.SOCKET_PORT) : 3001) : null;
     static port: number = process.env.HTTP_PORT ? Number(process.env.HTTP_PORT) : 3000;
     static baseDir = path.resolve(__dirname, "../socket");
+
     static ETH_APIKEY = process.env.ETH_APIKEY;
     static ETHPLORER_APIKEY = process.env.ETHPLORER_APIKEY;
+
+    public static HELIUS_API_KEY = process.env.HELIUS_API_KEY;
+    public static SOLANA_API_URL = "https://api.mainnet-beta.solana.com";
+
     static arrayStables = ["USDT", "USDC", "DAI", "BUSD", "PAX", "ETH", "WETH", "WBTC"]
     
     static rateLimitThreshold = 10000; // 10 000 Events par seconde
@@ -151,94 +157,33 @@ export class Autoload { // This is the class that starts the server
 
     }
 
-    private static async fetchAndUpdateSolanaTransactions() {
-        try {
-            const solanaWallets = await SolanaWallet.find();
+    public static async fetchAndUpdateSolanaTransactions() {
+        const LOOP_DELAY = 30000; // 30s or your preference
     
-            for (const wallet of solanaWallets) {
-                for (const address of wallet.wallets) {
-                    await new Promise(resolve => setTimeout(resolve, 1000 / 5)); 
+        async function processTransactions() {
+          try {
+            const wallets = await SolanaWallet.find();
     
-                    const params = JSON.stringify({
-                        jsonrpc: "2.0",
-                        id: 1,
-                        method: "getConfirmedSignaturesForAddress2",
-                        params: [
-                            address,
-                            { limit: 20 }
-                        ]
-                    });
-    
-                    const rpcUrl = 'https://api.mainnet-beta.solana.com';
-    
-                    try {
-                        const signaturesResponse = await axios.post(rpcUrl, params, {
-                            headers: {'Content-Type': 'application/json'}
-                        });
-    
-                        let signatures = signaturesResponse.data.result;
-    
-                        for (const sigInfo of signatures) {
-                            const txParams = JSON.stringify({
-                                jsonrpc: "2.0",
-                                id: 1,
-                                method: "getTransaction",
-                                params: [
-                                    sigInfo.signature,
-                                    "jsonParsed"
-                                ]
-                            });
-    
-                            const txResponse = await axios.post(rpcUrl, txParams, {
-                                headers: {'Content-Type': 'application/json'}
-                            });
-    
-                            const transactionDetails = txResponse.data.result;
-                            if (!transactionDetails) continue;
-    
-                            const { transaction, meta } = transactionDetails;
-                            const postTokenBalances = meta.postTokenBalances;
-                            const preTokenBalances = meta.preTokenBalances;
-    
-                            const swaps = [];
-    
-                            if (postTokenBalances && preTokenBalances) {
-                                for (const postBalance of postTokenBalances) {
-                                    const preBalance = preTokenBalances.find((pre: { mint: any; }) => pre.mint === postBalance.mint);
-                                    if (preBalance) {
-                                        const amountChange = postBalance.uiTokenAmount.uiAmount - preBalance.uiTokenAmount.uiAmount;
-                                        const tokenSymbol = postBalance.uiTokenAmount.tokenSymbol || 'EXCHANGE';
-    
-                                        swaps.push({
-                                            tokenSymbol: tokenSymbol,
-                                            amountChange: amountChange
-                                        });
-                                    }
-                                }
-                            }
-    
-                            swaps.forEach(swap => {
-                                console.log(`${swap.tokenSymbol}: ${swap.amountChange > 0 ? '+' : ''}${swap.amountChange}`);
-                            });
-    
-                            await new SolTransaction({
-                                signature: sigInfo.signature,
-                                blockTime: transactionDetails.blockTime,
-                                slot: transactionDetails.slot,
-                                swaps: swaps
-                            }).save();
-                        }
-    
-                    } catch (error) {
-                        Logger.error(`Error fetching Solana transactions for wallet ${address}: ${error}`);
-                    }
-                }
+            for (const wallet of wallets) {
+              for (const address of wallet.wallets) {
+                console.log(`\n[FETCH SOL] SWAPS for ${wallet.username} - ${address}`);
+                await processSolSwaps(address);
+              }
             }
-        } catch (error) {
-            Logger.error(`Failed to fetch Solana transactions: ${error}`);
+          } catch (error) {
+            console.error("Main SOL process error:", error);
+            Logger.error(`Solana Swap Error: ${String(error)}`);
+          }
         }
-        setTimeout(Autoload.fetchAndUpdateSolanaTransactions, 5000); // Schedule the next update
-    }
+    
+        // 1) initial call
+        await processTransactions();
+    
+        // 2) schedule next run
+        setTimeout(() => {
+            Autoload.fetchAndUpdateSolanaTransactions();
+        }, LOOP_DELAY);
+      }
     
     public static async fetchAndUpdateTransactions() {
       const processTransactions = async () => {
@@ -421,8 +366,8 @@ export class Autoload { // This is the class that starts the server
         Logger.beautifulSpace()
         Logger.info("Starting server...")
         DB_Connect().then(() => {
-            Autoload.fetchAndUpdateTransactions(); // Ethereum
-            // Autoload.fetchAndUpdateSolanaTransactions(); // Solana
+            //Autoload.fetchAndUpdateTransactions(); // Ethereum
+            Autoload.fetchAndUpdateSolanaTransactions(); // Solana
             // Autoload.fetchAndUpdateBnbTransactions(); // BNB Chain
             Autoload.rules()
             if(Autoload.app) {

@@ -1,8 +1,10 @@
 {
   "dependencies": {
+    "@solana/web3.js": "^1.98.0",
     "any-ascii": "^0.3.2",
     "axios": "^1.6.8",
     "bcrypt": "^5.1.1",
+    "buffer-layout": "^1.2.2",
     "chalk": "^4.1.2",
     "dotenv": "^16.3.1",
     "express": "^4.18.2",
