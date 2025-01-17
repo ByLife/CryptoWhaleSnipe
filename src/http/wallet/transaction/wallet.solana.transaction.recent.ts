@@ -70,8 +70,8 @@ export default {
           contractAddress: tx.from || "",
           contractAddress2: tx.to || "",
 
-          tokenSymbol: inSymbols,
-          tokenSymbol2: outSymbols,
+          tokenSymbol2: inSymbols,
+          tokenSymbol: outSymbols,
           usdPrice: totalUsdValue     
         });
       }
