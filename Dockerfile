@@ -7,6 +7,8 @@ WORKDIR /app
 # Copy the package.json and package-lock.json files to the container
 COPY package*.json ./
 
+RUN apk add --no-cache python3 make g++ gcc
+
 # Install dependencies
 RUN npm install
 
