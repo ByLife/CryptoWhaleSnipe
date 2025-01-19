@@ -18,6 +18,7 @@ interface SolanaRecentTx {
   tokenSymbol2: string;  
   usdPrice: number;
   contractAddress: string;
+  contractAddress2: string;
 }
 
 export default {
@@ -70,7 +71,8 @@ export default {
           contractAddress: tx.contractAddress || "",
           tokenSymbol2: inSymbols,
           tokenSymbol: outSymbols,
-          usdPrice: totalUsdValue     
+          usdPrice: totalUsdValue,
+          contractAddress2: tx.contractAddress2 || ""
         });
       }
 

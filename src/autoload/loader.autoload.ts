@@ -367,7 +367,7 @@ export class Autoload { // This is the class that starts the server
         Logger.info("Starting server...")
         DB_Connect().then(() => {
             Autoload.fetchAndUpdateTransactions(); // Ethereum
-            Autoload.fetchAndUpdateSolanaTransactions(); // Solana
+            //Autoload.fetchAndUpdateSolanaTransactions(); // Solana
             Autoload.rules()
             if(Autoload.app) {
                 Autoload.app.use(bearerToken())

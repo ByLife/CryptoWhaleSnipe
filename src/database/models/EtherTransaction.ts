@@ -22,6 +22,7 @@ export interface EtherTransaction {
     isError?: string;
     input?: string;
     contractAddress?: string;
+    contractAddress2?: string;
     cumulativeGasUsed?: string;
     gasUsed?: string;
     confirmations?: string;
@@ -65,6 +66,7 @@ const EtherTransactionSchema = new Schema({
     isError: String,
     input: String,
     contractAddress: String,
+    contractAddress2: String,
     cumulativeGasUsed: String,
     gasUsed: String,
     confirmations: String,

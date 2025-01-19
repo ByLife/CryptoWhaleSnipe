@@ -220,6 +220,7 @@ export async function processSolSwaps(address: string, maxPrice: number) {
           totalUsdValue,
 
           contractAddress: outputMint,
+          contractAddress2: inputMint,
         
 
           from: address,

@@ -83,6 +83,7 @@ export default {
                     singleTokenUsdValue: tx.singleTokenUsdValue,
                     singleTokenMarketCap: tx.singleTokenMarketCap,
                     contractAddress: tx.contractAddress,
+                    contractAddress2: tx.contractAddress2
                 });
             }
 
