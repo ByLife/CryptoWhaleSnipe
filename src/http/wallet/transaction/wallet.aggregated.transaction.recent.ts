@@ -5,6 +5,7 @@ import EtherTransaction from '../../../database/models/EtherTransaction';
 import EthereumWallet from '../../../database/models/EtherWallet';
 import AccessBearer from "../../../database/models/AccessBearer";
 import SolTransaction from "../../../database/models/SolTransaction";
+import SignalTransactions from "../../../database/models/SignalTransactions?";
 
 
 export default {
@@ -16,25 +17,13 @@ export default {
             if(!req.token) throw "Unauthorized access, missing 'token' in request header"
             if(!await AccessBearer.findOne({token: req.token})) throw "Unauthorized access"
 
-            const threeWeeksAgo = new Date(Date.now() - 3 * 7 * 24 * 60 * 60 * 1000);
-            const transactionsEth = await EtherTransaction.find({
-                timestamp: {
-                    $gte: threeWeeksAgo
-                }
-            }).lean();
+            const threehoursAgo = new Date(Date.now() - 3 * 60 * 60 * 1000);
 
-            const transactionsSol = await SolTransaction.find({
-                timestamp: {
-                    $gte: threeWeeksAgo
-                }
-            }).lean();
+            const signals = await SignalTransactions.find({
+                createdAt: { $gte: threehoursAgo }
+            });
 
-            const results: any = [];
-            
-
-            }
-
-            res.status(200).json(results);
+            res.status(200).json({ signals });
         } catch (error) {
             res.status(400).json({ error: error });
         }
