@@ -157,6 +157,91 @@ export class Autoload { // This is the class that starts the server
 
     }
 
+    public static async aggregateTransactions() {
+        const LOOP_DELAY = 30000; // 30s or your preference
+    
+        async function processAggregation() {
+          try {
+            const wallets = await EthereumWallet.find();
+            const currentTime = new Date();
+            // Last 3 weeks:
+            const threeWeeksAgo = new Date(currentTime.getTime() - 3 * 7 * 24 * 60 * 60 * 1000);
+    
+            const transactionsEth = await EtherTransaction.find({
+              timestamp: {
+                $gte: threeWeeksAgo
+              }
+            }).lean();
+    
+            const transactionsSol = await SolTransaction.find({
+              timestamp: {
+                $gte: threeWeeksAgo
+              }
+            }).lean();
+    
+            const results: any = [];
+    
+            for (const wallet of wallets) {
+              const walletAddresses = wallet.wallets;
+    
+              for (const walletAddress of walletAddresses) {
+                const walletTransactionsEth = transactionsEth.filter(
+                  (tx: any) => tx.from === walletAddress || tx.to === walletAddress
+                );
+    
+                const walletTransactionsSol = transactionsSol.filter(
+                  (tx: any) => tx.from === walletAddress || tx.to === walletAddress
+                );
+    
+                const ethTransactions = walletTransactionsEth.map((tx: any) => {
+                  return {
+                    hash: tx.hash,
+                    type: tx.type,
+                    timestamp: tx.timestamp,
+                    from: tx.from,
+                    to: tx.to,
+                    value: tx.value,
+                    tokenSymbol: tx.tokenSymbol,
+                    tokenSymbol2: tx.tokenSymbol2,
+                    outTokens: tx.outTokens,
+                    inTokens: tx.inTokens,
+                    finalToken: tx.finalToken,
+                    totalUsdValue: tx.totalUsdValue
+                  };
+                });
+    
+                const solTransactions = walletTransactionsSol.map((tx: any) => {
+                  return {
+                    hash: tx.hash,
+                    type: tx.type,
+                    timestamp: tx.timestamp,
+                    from: tx.from,
+                    to: tx.to,
+                    value: tx.value,
+                    tokenSymbol: tx.tokenSymbol,
+                    tokenSymbol2: tx.tokenSymbol2,
+                    outTokens: tx.outTokens,
+                    inTokens: tx.inTokens,
+                    finalToken: tx.finalToken,
+                    totalUsdValue: tx.totalUsdValue
+                  };
+                });
+    
+                results.push({
+                  username: wallet.username,
+                  wallet: walletAddress,
+                  ethTransactions,
+                  solTransactions
+                });
+              }
+            }
+          } catch (error) {
+            console.error("Main aggregation process error:", error);
+            Logger.error(`Aggregation Error: ${String(error)}`);
+          }
+        }
+    }
+
     public static async fetchAndUpdateSolanaTransactions() {
         const LOOP_DELAY = 30000; // 30s or your preference
     
@@ -167,7 +252,7 @@ export class Autoload { // This is the class that starts the server
             for (const wallet of wallets) {
               for (const address of wallet.wallets) {
                 console.log(`\n[FETCH SOL] SWAPS for ${wallet.username} - ${address}`);
-                await processSolSwaps(address, 5000); // 5000$ min value
+                await processSolSwaps(address, 10000); // 10000$ min value
               }
             }
           } catch (error) {
@@ -263,8 +348,8 @@ export class Autoload { // This is the class that starts the server
                     chosenTokenMarketCap
                   } = classification;
   
-                  // If under $5,000, skip (your custom cutoff)
-                  if (totalUsdValue < 5000) {
+                  // If under $10,000, skip (your custom cutoff)
+                  if (totalUsdValue < 10000) {
                     continue;
                   }
   
@@ -368,6 +453,7 @@ export class Autoload { // This is the class that starts the server
         DB_Connect().then(() => {
             Autoload.fetchAndUpdateTransactions(); // Ethereum
             //Autoload.fetchAndUpdateSolanaTransactions(); // Solana
+            Autoload.aggregateTransactions(); // Aggregate into Signals
             Autoload.rules()
             if(Autoload.app) {
                 Autoload.app.use(bearerToken())
