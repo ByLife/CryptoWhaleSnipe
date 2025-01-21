@@ -8,14 +8,16 @@ export function delay(ms: number): Promise<void> {
 }
 
 // --------------- Fetch Etherscan tokenTx ---------------
-
-export async function fetchEtherscanTxs(address: string, ethApiKey: string, retryCount = 3): Promise<any[]> {
-    const url =
+export async function fetchEtherscanTxs(
+  address: string,
+  ethApiKey: string,
+  retryCount = 3
+): Promise<any[]> {
+  const url =
     `https://api.etherscan.io/api` +
     `?module=account&action=tokentx&address=${address}` +
     `&startblock=0&endblock=99999999&sort=desc` +
     `&apikey=${ethApiKey}`;
-
 
   for (let attempt = 1; attempt <= retryCount; attempt++) {
     try {
@@ -38,7 +40,10 @@ export async function fetchEtherscanTxs(address: string, ethApiKey: string, retr
 }
 
 // --------------- Fetch Ethplorer data for a given tx ---------------
-export async function fetchEthplorerData(txHash: string, ethplorerApiKey: string): Promise<any | null> {
+export async function fetchEthplorerData(
+  txHash: string,
+  ethplorerApiKey: string
+): Promise<any | null> {
   const ethplorerUrl = `https://api.ethplorer.io/getTxInfo/${txHash}?apiKey=${ethplorerApiKey}`;
   try {
     const res = await axios.get(ethplorerUrl);
@@ -57,30 +62,36 @@ export function parseTokenOperations(
   realTo: string,
   realValueETH: number
 ): {
-  tokenOperations: Map<string, {
-    symbol: string;
-    decimals: number;
-    price: number;
-    marketCapUsd: number;     
-    totalOut: number;
-    totalIn: number;
-    operations: any[];
-  }>;
+  tokenOperations: Map<
+    string,
+    {
+      symbol: string;
+      decimals: number;
+      price: number;
+      marketCapUsd: number;
+      totalOut: number;
+      totalIn: number;
+      operations: any[];
+    }
+  >;
   spentEthAmount: number;
 } {
-  const userIsSender = (realFrom === userAddr);
+  const userIsSender = realFrom === userAddr;
   let spentEthAmount = 0;
 
   // We'll store (symbol, decimals, price, marketCapUsd, totalOut, totalIn, operations)
-  const tokenOperations = new Map<string, {
-    symbol: string;
-    decimals: number;
-    price: number;
-    marketCapUsd: number;
-    totalOut: number;
-    totalIn: number;
-    operations: any[];
-  }>();
+  const tokenOperations = new Map<
+    string,
+    {
+      symbol: string;
+      decimals: number;
+      price: number;
+      marketCapUsd: number;
+      totalOut: number;
+      totalIn: number;
+      operations: any[];
+    }
+  >();
 
   // If user is sender with top-level ETH
   if (userIsSender && realValueETH > 0) {
@@ -90,10 +101,10 @@ export function parseTokenOperations(
       symbol: "ETH",
       decimals: 18,
       price: fallbackEthPrice,
-      marketCapUsd: 0,    // No direct marketcap here unless you want to add
+      marketCapUsd: 0, // No direct marketcap here unless you want to add
       totalOut: realValueETH,
       totalIn: 0,
-      operations: []
+      operations: [],
     });
   }
 
@@ -104,10 +115,10 @@ export function parseTokenOperations(
       symbol: "ETH",
       decimals: 18,
       price: fallbackEthPrice,
-      marketCapUsd: 0,    
+      marketCapUsd: 0,
       totalOut: 0,
       totalIn: realValueETH,
-      operations: []
+      operations: [],
     });
   }
 
@@ -120,19 +131,21 @@ export function parseTokenOperations(
     if (!tokenOperations.has(tokenAddr)) {
       tokenOperations.set(tokenAddr, {
         symbol: op.tokenInfo?.symbol || "UNKNOWN",
-        decimals: op.tokenInfo?.decimals ? Number(op.tokenInfo.decimals) : 18,
+        decimals: op.tokenInfo?.decimals
+          ? Number(op.tokenInfo.decimals)
+          : 18,
         price: op.tokenInfo?.price?.rate || 0,
         marketCapUsd: op.tokenInfo?.price?.marketCapUsd || 0, // <--
         totalOut: 0,
         totalIn: 0,
-        operations: []
+        operations: [],
       });
     }
 
     const tOp = tokenOperations.get(tokenAddr)!;
     tOp.operations.push(op);
 
-    const numericValue = parseFloat(op.value) / (10 ** tOp.decimals);
+    const numericValue = parseFloat(op.value) / 10 ** tOp.decimals;
 
     // If op.from is user => out
     if ((op.from || "").toLowerCase() === userAddr) {
@@ -149,15 +162,18 @@ export function parseTokenOperations(
 
 // --------------- Classify + pick single token + sum up USD ---------------
 export function classifyTransaction(
-  tokenOperations: Map<string, {
-    symbol: string;
-    decimals: number;
-    price: number;
-    marketCapUsd: number;
-    totalOut: number;
-    totalIn: number;
-    operations: any[];
-  }>,
+  tokenOperations: Map<
+    string,
+    {
+      symbol: string;
+      decimals: number;
+      price: number;
+      marketCapUsd: number;
+      totalOut: number;
+      totalIn: number;
+      operations: any[];
+    }
+  >,
   operations: any[],
   userAddr: string,
   spentEthAmount: number,
@@ -165,9 +181,24 @@ export function classifyTransaction(
 ): {
   type: string;
   tokenDetails: {
-    outTokens: { symbol: string; amount: number; usdValue: number; marketCapUsd: number }[];
-    inTokens: { symbol: string; amount: number; usdValue: number; marketCapUsd: number }[];
-    finalToken: null | { symbol: string; amount: number; usdValue: number; marketCapUsd: number };
+    outTokens: {
+      symbol: string;
+      amount: number;
+      usdValue: number;
+      marketCapUsd: number;
+    }[];
+    inTokens: {
+      symbol: string;
+      amount: number;
+      usdValue: number;
+      marketCapUsd: number;
+    }[];
+    finalToken: null | {
+      symbol: string;
+      amount: number;
+      usdValue: number;
+      marketCapUsd: number;
+    };
   };
   outSymbols: string[];
   inSymbols: string[];
@@ -178,13 +209,30 @@ export function classifyTransaction(
   chosenTokenMarketCap: number;
 } {
   let type = "unknown";
-  const userIsSender = (realFrom === userAddr);
+  const userIsSender = realFrom === userAddr;
 
   // Build tokenDetails
   const tokenDetails = {
-    outTokens: [] as { symbol: string; amount: number; usdValue: number; marketCapUsd: number }[],
-    inTokens: [] as { symbol: string; amount: number; usdValue: number; marketCapUsd: number }[],
-    finalToken: null as null | { symbol: string; amount: number; usdValue: number; marketCapUsd: number }
+    outTokens: [] as {
+      symbol: string;
+      amount: number;
+      usdValue: number;
+      marketCapUsd: number;
+    }[],
+    inTokens: [] as {
+      symbol: string;
+      amount: number;
+      usdValue: number;
+      marketCapUsd: number;
+    }[],
+    finalToken: null as
+      | {
+          symbol: string;
+          amount: number;
+          usdValue: number;
+          marketCapUsd: number;
+        }
+      | null,
   };
 
   // Summarize out/in
@@ -195,7 +243,7 @@ export function classifyTransaction(
         symbol: data.symbol,
         amount: data.totalOut,
         usdValue: data.totalOut * data.price,
-        marketCapUsd: data.marketCapUsd
+        marketCapUsd: data.marketCapUsd,
       });
     }
     // inTokens
@@ -204,7 +252,7 @@ export function classifyTransaction(
         symbol: data.symbol,
         amount: data.totalIn,
         usdValue: data.totalIn * data.price,
-        marketCapUsd: data.marketCapUsd
+        marketCapUsd: data.marketCapUsd,
       });
     }
   }
@@ -217,12 +265,13 @@ export function classifyTransaction(
     const finalAddr = (lastIncomingOp.tokenInfo?.address || "").toLowerCase();
     if (tokenOperations.has(finalAddr)) {
       const finalData = tokenOperations.get(finalAddr)!;
-      const finalAmt = parseFloat(lastIncomingOp.value) / (10 ** finalData.decimals);
+      const finalAmt =
+        parseFloat(lastIncomingOp.value) / 10 ** finalData.decimals;
       tokenDetails.finalToken = {
         symbol: finalData.symbol,
         amount: finalAmt,
         usdValue: finalAmt * finalData.price,
-        marketCapUsd: finalData.marketCapUsd
+        marketCapUsd: finalData.marketCapUsd,
       };
     }
   }
@@ -232,7 +281,8 @@ export function classifyTransaction(
   if (operations[0]) {
     fromIsZero =
       !operations[0].from ||
-      operations[0].from === "0x0000000000000000000000000000000000000000";
+      operations[0].from ===
+        "0x0000000000000000000000000000000000000000";
   }
 
   if (fromIsZero && (operations[0]?.to || "").toLowerCase() === userAddr) {
@@ -271,7 +321,7 @@ export function classifyTransaction(
   // ---------------------------------------------------
   // NEW: Pick a single token’s usdValue & marketCap
   // Priority: finalToken if it exists, else the first outToken if any,
-  // else the first inToken if any. Adjust as you see fit.
+  // else the first inToken if any.
   // ---------------------------------------------------
   let chosenTokenUsdValue = 0;
   let chosenTokenMarketCap = 0;
@@ -287,7 +337,6 @@ export function classifyTransaction(
     chosenTokenUsdValue = tokenDetails.inTokens[0].usdValue;
     chosenTokenMarketCap = tokenDetails.inTokens[0].marketCapUsd;
   }
-  // ---------------------------------------------------
 
   return {
     type,
@@ -296,7 +345,7 @@ export function classifyTransaction(
     inSymbols,
     totalUsdValue,
     chosenTokenUsdValue,
-    chosenTokenMarketCap
+    chosenTokenMarketCap,
   };
 }
 
@@ -304,9 +353,26 @@ export function classifyTransaction(
 export function buildSummary(
   type: string,
   tokenDetails: {
-    outTokens: { symbol: string; amount: number; usdValue: number; marketCapUsd: number }[];
-    inTokens: { symbol: string; amount: number; usdValue: number; marketCapUsd: number }[];
-    finalToken: null | { symbol: string; amount: number; usdValue: number; marketCapUsd: number };
+    outTokens: {
+      symbol: string;
+      amount: number;
+      usdValue: number;
+      marketCapUsd: number;
+    }[];
+    inTokens: {
+      symbol: string;
+      amount: number;
+      usdValue: number;
+      marketCapUsd: number;
+    }[];
+    finalToken:
+      | {
+          symbol: string;
+          amount: number;
+          usdValue: number;
+          marketCapUsd: number;
+        }
+      | null;
   }
 ): string {
   let summary = "";
@@ -335,27 +401,47 @@ export function buildSummary(
 export async function storeTransactionIfNeeded(
   tx: any,
   tokenDetails: {
-    outTokens: { symbol: string; amount: number; usdValue: number; marketCapUsd: number }[];
-    inTokens: { symbol: string; amount: number; usdValue: number; marketCapUsd: number }[];
-    finalToken: null | { symbol: string; amount: number; usdValue: number; marketCapUsd: number };
+    outTokens: {
+      symbol: string;
+      amount: number;
+      usdValue: number;
+      marketCapUsd: number;
+    }[];
+    inTokens: {
+      symbol: string;
+      amount: number;
+      usdValue: number;
+      marketCapUsd: number;
+    }[];
+    finalToken:
+      | {
+          symbol: string;
+          amount: number;
+          usdValue: number;
+          marketCapUsd: number;
+        }
+      | null;
   },
   type: string,
   summary: string,
   totalUsdValue: number,
   outSymbols: string[],
   inSymbols: string[],
-  chosenTokenUsdValue: number,     // <--
-  chosenTokenMarketCap: number     // <--
+  chosenTokenUsdValue: number,
+  chosenTokenMarketCap: number
 ): Promise<void> {
+  // Check if transaction is already stored
   const existing = await EtherTransaction.findOne({ hash: tx.hash });
   if (existing) {
     return;
   }
 
-  // Build symbols
-  const tokenSymbol = (outSymbols.length > 0)
+  // Build out tokenSymbol + tokenSymbol2 for top-level
+  const tokenSymbol = outSymbols.length
     ? outSymbols.join(", ")
-    : (inSymbols.length > 0 ? inSymbols.join(", ") : "UNKNOWN");
+    : inSymbols.length
+    ? inSymbols.join(", ")
+    : "UNKNOWN";
 
   let tokenSymbol2 = "UNKNOWN";
   if (tokenDetails.finalToken?.symbol) {
@@ -365,6 +451,9 @@ export async function storeTransactionIfNeeded(
   }
 
   try {
+    // Insert new doc
+
+    Logger.fatal(`Contract address 2 : ${tx.contractAddress2}`);
     await EtherTransaction.create({
       hash: tx.hash,
       blockNumber: tx.blockNumber,
@@ -378,7 +467,13 @@ export async function storeTransactionIfNeeded(
       gasPrice: tx.gasPrice,
       isError: tx.isError,
       input: tx.input,
+
+      // existing contractAddress
       contractAddress: tx.contractAddress,
+
+      // NEW: contractAddress2 if your code is storing it
+      contractAddress2: tx.contractAddress2 || "",
+
       cumulativeGasUsed: tx.cumulativeGasUsed,
       gasUsed: tx.gasUsed,
       confirmations: tx.confirmations,

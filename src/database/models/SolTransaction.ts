@@ -2,37 +2,64 @@
 
 import mongoose, { Document, Schema } from "mongoose";
 
+interface SolTokenDetail {
+  symbol: string;
+  amount: number;
+  usdValue?: number;
+}
+
 export interface SolanaTransaction {
   signature: string;
   blockTime: number;
   slot: number;
-  swaps: {
+  swaps?: {
     tokenSymbol: string;
     amountChange: number;
     usdValue?: number;
   }[];
+
+  outTokens?: SolTokenDetail[];
+  inTokens?: SolTokenDetail[];
+  finalToken?: SolTokenDetail;
+  totalUsdValue?: number;
   from?: string;
   to?: string;
   type?: string;
+
+  contractAddress?: string;
+  contractAddress2?: string;
 }
 
+const SolTokenDetailSchema = new Schema(
+  {
+    symbol: String,
+    amount: Number,
+    usdValue: Number,
+  },
+  { _id: false }
+);
+
 const SolanaTransactionSchema = new Schema({
-  signature: String,
+  signature: { type: String, unique: true },
   blockTime: Number,
   slot: Number,
-  swaps: [
-    {
-      tokenSymbol: String,
-      amountChange: Number,
-      usdValue: Number,
-    },
-  ],
+
+  outTokens: [SolTokenDetailSchema],
+  inTokens: [SolTokenDetailSchema],
+  finalToken: SolTokenDetailSchema,
+  totalUsdValue: Number,
+
   from: String,
   to: String,
   type: String,
+
+  contractAddress: String,
+  contractAddress2: String,
+},{
+  timestamps: true
 });
 
-export default mongoose.model<Document & SolanaTransaction>(
+export default mongoose.model<SolanaTransaction & Document>(
   "SolanaTransaction",
   SolanaTransactionSchema
 );

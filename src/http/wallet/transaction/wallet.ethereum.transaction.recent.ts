@@ -6,7 +6,7 @@ import EthereumWallet from '../../../database/models/EtherWallet';
 import AccessBearer from "../../../database/models/AccessBearer";
 
 export default {
-    name: "/wallet/transaction/recent",
+    name: "/wallet/ethereum/transaction/recent",
     description: "Get recent transactions",
     method: "GET",
     run: async (req: express.Request, res: express.Response) => {
@@ -14,14 +14,14 @@ export default {
             if(!req.token) throw "Unauthorized access, missing 'token' in request header"
             if(!await AccessBearer.findOne({token: req.token})) throw "Unauthorized access"
 
-            const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+            const threeHoursAgo = new Date(Date.now() - 3 * 60 * 60 * 1000);
             const transactions = await EtherTransaction.find({
                 timestamp: {
-                    $gte: oneDayAgo
+                    $gte: threeHoursAgo
                 }
             }).lean();
 
-            const results = [];
+            const results: any = [];
             for (const tx of transactions) {
                 // Find wallet that matches either from or to address
                 const wallet = await EthereumWallet.findOne({
@@ -83,6 +83,7 @@ export default {
                     singleTokenUsdValue: tx.singleTokenUsdValue,
                     singleTokenMarketCap: tx.singleTokenMarketCap,
                     contractAddress: tx.contractAddress,
+                    contractAddress2: tx.contractAddress2
                 });
             }
 
