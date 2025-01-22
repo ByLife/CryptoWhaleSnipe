@@ -46,7 +46,7 @@ export class Autoload { // This is the class that starts the server
     public static HELIUS_API_KEY = process.env.HELIUS_API_KEY;
     public static SOLANA_API_URL = "https://api.mainnet-beta.solana.com";
 
-    static arrayStables = ["USDT", "USDC", "DAI", "BUSD", "PAX", "ETH", "WETH", "WBTC"]
+    static arrayStables = ["USDT", "USDC", "DAI", "BUSD", "PAX", "ETH", "WETH", "WBTC", "USDe", "USDE"];
     
     static rateLimitThreshold = 10000; // 10 000 Events par seconde
     static rateLimitDuration = 10000; // 1 seconde
@@ -159,6 +159,7 @@ export class Autoload { // This is the class that starts the server
     }
 
     public static async aggregateTransactions() {
+          Logger.info(`[AGGREGATE] Starting...`);
           const walletsEth = await EthereumWallet.find();
           const walletsSol = await SolanaWallet.find();
 
@@ -177,86 +178,51 @@ export class Autoload { // This is the class that starts the server
               $gte: threeWeeksAgo
             }
           }).lean();
-    
-          // Group transactions by wallet address
-          const walletTransactionsEth = {};
+
+          // get every tokenSymbol (or tokenSymbol2) that has been interacted with in the last 3 weeks, their usdPrice and the wallets that interacted with them and a count of the number of wallets
+
+          const tokenSymbols = new Set<string>();
+          const wallets = new Set<string>();
+          const tokenPrices = new Map<string, number>();
+          const tokenMarketCaps = new Map<string, number>();
+          const tokenTransactions = new Map<string, number>();
+          const tokenWallets = new Map<string, Set<string>>();
+
           for (const tx of transactionsEth) {
-            for (const wallet of walletsEth) {
-              if (wallet.wallets.includes(tx.from as any) || wallet.wallets.includes(tx.to as any)) {
-                if (!walletTransactionsEth[wallet.username]) {
-                  walletTransactionsEth[wallet.username] = [];
-                }
-                walletTransactionsEth[wallet.username].push(tx);
-              }
+            // for each transaction, get the tokenSymbol & tokenSymbol2 and the wallet address (from or to depending on if it is in EtherWallet)
+            const tokenSymbol = tx.tokenSymbol;
+            const tokenSymbol2 = tx.tokenSymbol2;
+            // Validate and add wallet address to set
+            if (!tx.from || !tx.to) {
+              continue;
+            }
+            wallets.add(
+              tx.from in walletsEth 
+                ? tx.from 
+                : tx.to
+            );
+
+            // Add tokenSymbol to set
+            if (tokenSymbol) {
+              tokenSymbols.add(tokenSymbol);
+            }
+            if (tokenSymbol2) {
+              tokenSymbols.add(tokenSymbol2);
             }
           }
 
-            // Group transactions by wallet address
-            const walletTransactionsSol = {};
-            for (const tx of transactionsSol) {
-              for (const wallet of walletsSol) {
-                if (wallet.wallets.includes(tx.from as any) || wallet.wallets.includes(tx.to as any)) {
-                  if (!walletTransactionsSol[wallet.username]) {
-                    walletTransactionsSol[wallet.username] = [];
-                  }
-                  walletTransactionsSol[wallet.username].push(tx);
-                }
-              }
-            }
+          const blacklistedTokens = new Set<string>(["WBTC", "WETH", "SOL", "ETH"]);
+          // keep tokenSymbols that are not stablecoins and not in the blacklist
+          const filteredTokenSymbols = Array.from(tokenSymbols).filter(
+            (symbol) => !Autoload.arrayStables.includes(symbol) && !blacklistedTokens.has(symbol)
+          );
 
-            Logger.info(`Found ${Object.keys(walletTransactionsEth).length} wallets with transactions in the last 3 weeks`);
+          // for each tokenSymbol if there are more than 2 wallets interacting with it, save it as a SignalTransaction
+          
 
-            // create SignalTransactions for Ethereum if a tokenSymbol is interacted with in 2 wallets and more in the last 3 weeks and with a total value of more than 2000$
-            for (const wallet of walletsEth) {
-              for (const key of Object.keys(walletTransactionsEth)) {
-                const transactions = walletTransactionsEth[key];
-                // Calculate total value of transactions by adding usdValue of all transactions
-                const totalValue = transactions.reduce((acc, tx) => acc + tx.usdValue, 0);
-                if (totalValue > 2000) {
-                  Logger.info(`Creating SignalTransaction for ${wallet.username} with total value of ${totalValue}`);
-                  const transaction = transactions[0];
-                  const tokenSymbol = transaction.tokenSymbol;
-                  const type = transaction.type;
-
-                  const signalTransaction = new SignalTransactions({
-                    tokenSymbol,
-                    usdValue: totalValue,
-                    wallets: wallet.wallets,
-                    type,
-                  });
-
-                  await signalTransaction.save();
-                }
-              }
-            }
-  
-            // create SignalTransactions for Solana if token is interacted with more than 2000$ and 2 wallets in the last 3 weeks
-            for (const wallet of walletsSol) {
-              for (const key of Object.keys(walletTransactionsSol)) {
-                const transactions = walletTransactionsSol[key];
-                // Calculate total value of transactions by adding usdValue of all transactions
-                const totalValue = transactions.reduce((acc, tx) => acc + tx.usdValue, 0);
-                if (totalValue > 2000) {
-                  Logger.info(`Creating SignalTransaction for ${wallet.username} with total value of ${totalValue}`);
-                  const transaction = transactions[0];
-                  const tokenSymbol = transaction.tokenSymbol;
-                  const type = transaction.type;
-
-                  const signalTransaction = new SignalTransactions({
-                    tokenSymbol,
-                    usdValue: totalValue,
-                    wallets: wallet.wallets,
-                    type,
-                  });
-
-                  await signalTransaction.save();
-                }
-              }
-            }
-
+        Logger.info(`[AGGREGATE] Done, waiting 30s...`);
         // Schedule next run
         setTimeout(() => {
-          Logger.error("Aggregating transactions...");
           Autoload.aggregateTransactions();
         }, 30000);
     }
