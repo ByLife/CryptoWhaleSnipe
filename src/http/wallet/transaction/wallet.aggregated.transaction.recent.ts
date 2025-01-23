@@ -5,7 +5,7 @@ import EtherTransaction from '../../../database/models/EtherTransaction';
 import EthereumWallet from '../../../database/models/EtherWallet';
 import AccessBearer from "../../../database/models/AccessBearer";
 import SolTransaction from "../../../database/models/SolTransaction";
-import SignalTransactions from "../../../database/models/SignalTransactions?";
+import SignalTransactions from "../../../database/models/SignalTransactions";
 
 
 export default {

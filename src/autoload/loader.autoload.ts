@@ -18,9 +18,18 @@ import SolTransaction from "../database/models/SolTransaction";
 import axios from "axios";
 import { buildSummary, classifyTransaction, delay, fetchEtherscanTxs, fetchEthplorerData, parseTokenOperations, storeTransactionIfNeeded } from "./utils/EthTransactionHelpers";
 import { processSolSwaps } from "./utils/SolanaTransactionHelpers";
-import SignalTransactions, { SignalTransaction } from '../database/models/SignalTransactions?';
+import SignalTransactions, { SignalTransaction } from '../database/models/SignalTransactions';
 
 dotenv.config()
+
+interface TokenData {
+  totalUsdValue: number;
+  buys: number;
+  sells: number;
+  walletNames: Set<string>;
+  chain: 'ETH' | 'SOL';
+}
+
 
 interface TokenDetail {
     symbol: string;
@@ -159,73 +168,130 @@ export class Autoload { // This is the class that starts the server
     }
 
     public static async aggregateTransactions() {
-          Logger.info(`[AGGREGATE] Starting...`);
-          const walletsEth = await EthereumWallet.find();
-          const walletsSol = await SolanaWallet.find();
-
-          const currentTime = new Date();
-          // Last 3 weeks:
-          const threeWeeksAgo = new Date(currentTime.getTime() - 3 * 7 * 24 * 60 * 60 * 1000);
+      try {          
+          // Get wallets
+          const walletsEth = await EthereumWallet.find().lean();
+          const walletsSol = await SolanaWallet.find().lean();
+          
+          const ethAddresses = new Set(walletsEth.map(w => w.wallets[0].toLowerCase()));
+          const solAddresses = new Set(walletsSol.map(w => w.wallets[0].toLowerCase()));
   
-          const transactionsEth = await EtherTransaction.find({
-            timestamp: {
-              $gte: threeWeeksAgo
-            }
-          }).lean();
+          // Get transactions from last 3 weeks
+          const threeWeeksAgo = new Date(Date.now() - 3 * 7 * 24 * 60 * 60 * 1000);
+          
+          const [transactionsEth, transactionsSol] = await Promise.all([
+              EtherTransaction.find({ timestamp: { $gte: threeWeeksAgo } }).lean(),
+              SolTransaction.find({ timestamp: { $gte: threeWeeksAgo } }).lean()
+          ]);
   
-          const transactionsSol = await SolTransaction.find({
-            timestamp: {
-              $gte: threeWeeksAgo
-            }
-          }).lean();
+          const tokenWalletInteractions = new Map<string, Set<string>>();
+          const tokenSymbolCounts = new Map<string, number>();
+          let processedTx = 0;
 
-          // get every tokenSymbol (or tokenSymbol2) that has been interacted with in the last 3 weeks, their usdPrice and the wallets that interacted with them and a count of the number of wallets
-
-          const tokenSymbols = new Set<string>();
-          const wallets = new Set<string>();
-          const tokenPrices = new Map<string, number>();
-          const tokenMarketCaps = new Map<string, number>();
-          const tokenTransactions = new Map<string, number>();
-          const tokenWallets = new Map<string, Set<string>>();
-
+          const tokenData = new Map<string, TokenData>();
+  
+          // Update processTransaction function
+          const processTransaction = (tx: any, wallet: string, symbols: (string | undefined)[], usdValue: number, isBuy: boolean, chain: 'ETH' | 'SOL') => {
+            symbols.forEach(symbol => {
+                if (!symbol) return;
+                
+                if (!tokenWalletInteractions.has(symbol)) {
+                    tokenWalletInteractions.set(symbol, new Set());
+                    tokenSymbolCounts.set(symbol, 0);
+                    tokenData.set(symbol, {
+                        totalUsdValue: 0,
+                        buys: 0,
+                        sells: 0,
+                        walletNames: new Set(),
+                        chain
+                    });
+                }
+                
+                const walletSet = tokenWalletInteractions.get(symbol)!;
+                const data = tokenData.get(symbol)!;
+                
+                if (!walletSet.has(wallet)) {
+                    walletSet.add(wallet);
+                    tokenSymbolCounts.set(symbol, (tokenSymbolCounts.get(symbol) || 0) + 1);
+                    data.totalUsdValue += usdValue;
+                    isBuy ? data.buys++ : data.sells++;
+                    // Get wallet name from address
+                    const ethWallet = walletsEth.find(w => w.wallets[0].toLowerCase() === wallet);
+                    const solWallet = walletsSol.find(w => w.wallets[0].toLowerCase() === wallet);
+                    const walletName = ethWallet?.username || solWallet?.username || wallet.slice(0,8);
+                    data.walletNames.add(walletName);
+                    processedTx++;
+                }
+            });
+          };
+  
+          // Process ETH transactions
           for (const tx of transactionsEth) {
-            // for each transaction, get the tokenSymbol & tokenSymbol2 and the wallet address (from or to depending on if it is in EtherWallet)
-            const tokenSymbol = tx.tokenSymbol;
-            const tokenSymbol2 = tx.tokenSymbol2;
-            // Validate and add wallet address to set
-            if (!tx.from || !tx.to) {
-              continue;
-            }
-            wallets.add(
-              tx.from in walletsEth 
-                ? tx.from 
-                : tx.to
-            );
+              if (!tx.from || !tx.to) continue;
+              
+              const fromAddress = tx.from.toLowerCase();
+              const toAddress = tx.to.toLowerCase();
+              
+              const wallet = ethAddresses.has(fromAddress) ? fromAddress : 
+                            ethAddresses.has(toAddress) ? toAddress : null;
 
-            // Add tokenSymbol to set
-            if (tokenSymbol) {
-              tokenSymbols.add(tokenSymbol);
-            }
-            if (tokenSymbol2) {
-              tokenSymbols.add(tokenSymbol2);
-            }
+              if (wallet) {
+                const isBuy = toAddress === wallet;
+                const usdValue = tx.usdPrice || 0;
+                processTransaction(tx, wallet, [tx.tokenSymbol, tx.tokenSymbol2], usdValue, isBuy, 'ETH');
+              }
+          }
+  
+          // Process SOL transactions
+          for (const tx of transactionsSol) {
+              if (!tx.from || !tx.to) continue;
+              
+              const fromAddress = tx.from.toLowerCase();
+              const toAddress = tx.to.toLowerCase();
+              
+              const wallet = solAddresses.has(fromAddress) ? fromAddress :
+                            solAddresses.has(toAddress) ? toAddress : null;
+
+              if (wallet) {
+                const isBuy = toAddress === wallet;
+                const usdValue = tx.totalUsdValue || 0;
+                const inTokens = tx.inTokens?.map(t => t.symbol) || [];
+                const outTokens = tx.outTokens?.map(t => t.symbol) || []; 
+                processTransaction(tx, wallet, [...inTokens, ...outTokens], usdValue, isBuy, 'SOL');
+              }
           }
 
-          const blacklistedTokens = new Set<string>(["WBTC", "WETH", "SOL", "ETH"]);
-          // keep tokenSymbols that are not stablecoins and not in the blacklist
-          const filteredTokenSymbols = Array.from(tokenSymbols).filter(
-            (symbol) => !Autoload.arrayStables.includes(symbol) && !blacklistedTokens.has(symbol)
-          );
+          const blacklistedTokens = new Set<string>(["WBTC", "WETH", "SOL", "ETH", "UNKNOWN"]);
 
-          // for each tokenSymbol if there are more than 2 wallets interacting with it, save it as a SignalTransaction
+          const signalTransactions: SignalTransaction[] = [];
+
+          for (const [symbol, count] of tokenSymbolCounts.entries()) {
+            const data = tokenData.get(symbol)!;
+
+            if (count <= 1 || blacklistedTokens.has(symbol) || Autoload.arrayStables.includes(symbol)) continue;
+            
+            // check if tx is already in db
+            const existingTx = await SignalTransactions.findOne({ tokenSymbol: symbol, type: data.buys >= data.sells ? 'buy' : 'sell' });
+            if (existingTx) continue;
+
+            const signalTx = new SignalTransactions({
+                tokenSymbol: symbol,
+                wallets: Array.from(tokenWalletInteractions.get(symbol) || []),
+                usdValue: data.totalUsdValue,
+                type: data.buys >= data.sells ? 'buy' : 'sell',
+                walletNames: Array.from(data.walletNames),
+                chain: data.chain
+            });
+            signalTransactions.push(signalTx);
+        }
           
-
-        Logger.info(`[AGGREGATE] Done, waiting 30s...`);
-        // Schedule next run
-        setTimeout(() => {
-          Autoload.aggregateTransactions();
-        }, 30000);
-    }
+        await SignalTransactions.insertMany(signalTransactions);
+        setTimeout(() => Autoload.aggregateTransactions(), 30000);          
+      } catch (error) {
+          Logger.error(`[AGGREGATE] Error: ${String(error)}`);
+          setTimeout(() => Autoload.aggregateTransactions(), 60000);
+      }
+  }
 
     public static async fetchAndUpdateSolanaTransactions() {
         const LOOP_DELAY = 30000; // 30s or your preference
@@ -436,8 +502,8 @@ export class Autoload { // This is the class that starts the server
         Logger.beautifulSpace()
         Logger.info("Starting server...")
         DB_Connect().then(() => {
-            // Autoload.fetchAndUpdateTransactions(); // Ethereum
-            //Autoload.fetchAndUpdateSolanaTransactions(); // Solana
+            Autoload.fetchAndUpdateTransactions(); // Ethereum
+            Autoload.fetchAndUpdateSolanaTransactions(); // Solana
             Autoload.aggregateTransactions(); // Aggregate into Signals
             Autoload.rules()
             if(Autoload.app) {
