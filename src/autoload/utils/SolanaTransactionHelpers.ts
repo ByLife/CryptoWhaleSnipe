@@ -10,7 +10,9 @@ const HELIUS_API_KEY = process.env.HELIUS_API_KEY || "";
 const connection = new Connection("https://api.mainnet-beta.solana.com");
 
 // For reading on-chain metadata
-const TOKEN_METADATA_PROGRAM_ID = new PublicKey("metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s");
+const TOKEN_METADATA_PROGRAM_ID = new PublicKey(
+  "metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s"
+);
 
 // Timings
 const API_TIMEOUT = 10000;
@@ -24,7 +26,7 @@ let lastHeliusCall = 0;
 
 // Auto-fetch SOL price from CoinGecko every 1 min
 const SOL_PRICE_FETCH_INTERVAL = 60_000;
-let cachedSolPrice = 200;   // fallback
+let cachedSolPrice = 200; // fallback
 let lastSolPriceFetch = 0;
 
 /*******************************************
@@ -48,7 +50,7 @@ const tokenMetadataCache = new Map<string, any>();
  * Utility: delay
  *******************************************/
 function delay(ms: number): Promise<void> {
-  return new Promise(resolve => setTimeout(resolve, ms));
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 /*******************************************
@@ -56,7 +58,8 @@ function delay(ms: number): Promise<void> {
  *******************************************/
 async function fetchSolPriceFromCoinGecko() {
   try {
-    const url = "https://api.coingecko.com/api/v3/simple/price?ids=solana&vs_currencies=usd";
+    const url =
+      "https://api.coingecko.com/api/v3/simple/price?ids=solana&vs_currencies=usd";
     const resp = await axios.get(url, { timeout: API_TIMEOUT });
     const solPrice = resp.data?.solana?.usd;
     if (solPrice) {
@@ -155,16 +158,23 @@ export async function processSolSwaps(address: string, maxPrice: number) {
 
         // Log
         const dateStr = new Date(tx.timestamp * 1000).toLocaleString();
-        const ratio = outputAmount ? (inputAmount / outputAmount) : 0;
+        const ratio = outputAmount ? inputAmount / outputAmount : 0;
 
         console.log("\n------------------------");
         console.log(`SWAP | ${dateStr}`);
         console.log(
-          `${inputAmount.toFixed(4)} ${inputMeta.symbol} (${inputMeta.name}) `
-          + `→ ${outputAmount.toFixed(4)} ${outputMeta.symbol} (${outputMeta.name})`
+          `${inputAmount.toFixed(4)} ${inputMeta.symbol} (${inputMeta.name}) ` +
+            `→ ${outputAmount.toFixed(4)} ${outputMeta.symbol} (${
+              outputMeta.name
+            })`
         );
         if (ratio > 0) {
-          console.log(`Price: 1 ${outputMeta.symbol} = ${formatPrice(ratio, inputMeta.symbol)}`);
+          console.log(
+            `Price: 1 ${outputMeta.symbol} = ${formatPrice(
+              ratio,
+              inputMeta.symbol
+            )}`
+          );
         }
         console.log(`Source: ${tx.source || "Unknown"}`);
         console.log(`TX: ${tx.signature}`);
@@ -173,41 +183,58 @@ export async function processSolSwaps(address: string, maxPrice: number) {
         }
 
         // build outTokens / inTokens
-        let outTokens = [{
-          symbol: inputMeta.symbol,
-          amount: inputAmount,
-          usdValue: (inputMeta.symbol === "SOL") ? inputAmount * currentSolPrice : 0,
-        }];
-        let inTokens = [{
-          symbol: outputMeta.symbol,
-          amount: outputAmount,
-          usdValue: (outputMeta.symbol === "SOL") ? outputAmount * currentSolPrice : 0,
-        }];
+        let outTokens = [
+          {
+            symbol: inputMeta.symbol,
+            amount: inputAmount,
+            usdValue:
+              inputMeta.symbol === "SOL" ? inputAmount * currentSolPrice : 0,
+          },
+        ];
+        let inTokens = [
+          {
+            symbol: outputMeta.symbol,
+            amount: outputAmount,
+            usdValue:
+              outputMeta.symbol === "SOL" ? outputAmount * currentSolPrice : 0,
+          },
+        ];
 
         // totalUsdValue => if side is SOL
         let totalUsdValue = 0;
         if (inputMeta.symbol === "SOL") {
-          totalUsdValue = Math.max(totalUsdValue, inputAmount * currentSolPrice);
+          totalUsdValue = Math.max(
+            totalUsdValue,
+            inputAmount * currentSolPrice
+          );
         }
         if (outputMeta.symbol === "SOL") {
-          totalUsdValue = Math.max(totalUsdValue, outputAmount * currentSolPrice);
+          totalUsdValue = Math.max(
+            totalUsdValue,
+            outputAmount * currentSolPrice
+          );
         }
 
         // skip if < 1000
         if (totalUsdValue < maxPrice) {
-          console.log(`=> totalUsdValue=$${totalUsdValue.toFixed(2)} < 1000, skipping`);
+          console.log(
+            `=> totalUsdValue=$${totalUsdValue.toFixed(2)} < 1000, skipping`
+          );
           continue;
         }
 
         // check if already in DB
-        const existing = await SolTransactionModel.findOne({ signature: tx.signature });
+        const existing = await SolTransactionModel.findOne({
+          signature: tx.signature,
+        });
         if (existing) {
-          console.log(`Skipping. Tx with signature=${tx.signature} is already stored.`);
+          console.log(
+            `Skipping. Tx with signature=${tx.signature} is already stored.`
+          );
           continue; // no error
         }
 
         // insert
-
 
         await SolTransactionModel.create({
           signature: tx.signature,
@@ -221,16 +248,18 @@ export async function processSolSwaps(address: string, maxPrice: number) {
 
           contractAddress: outputMint,
           contractAddress2: inputMint,
-        
 
           from: address,
           to: address,
           type: "swap",
         });
 
-        console.log(`Saved swap tx: ${tx.signature} (usdValue=$${totalUsdValue.toFixed(2)})`);
+        console.log(
+          `Saved swap tx: ${tx.signature} (usdValue=$${totalUsdValue.toFixed(
+            2
+          )})`
+        );
         await delay(TX_DELAY);
-
       } catch (err) {
         console.error("Error processing swap tx:", err);
         Logger.error(`Error processing swap ${tx.signature}: ${String(err)}`);
@@ -258,7 +287,9 @@ async function getTokenMetadata(mintAddress: string) {
     const accountInfo = await connection.getParsedAccountInfo(mintPubkey);
     const parsedData = accountInfo.value?.data;
     const basicInfo: any =
-      parsedData && "parsed" in parsedData ? parsedData.parsed?.info : { decimals: 9 };
+      parsedData && "parsed" in parsedData
+        ? parsedData.parsed?.info
+        : { decimals: 9 };
 
     try {
       const [metadataPDA] = PublicKey.findProgramAddressSync(
@@ -272,8 +303,12 @@ async function getTokenMetadata(mintAddress: string) {
       const metadataInfo = await connection.getAccountInfo(metadataPDA);
       if (metadataInfo) {
         const metadata = METADATA_LAYOUT.decode(metadataInfo.data);
-        const name = Buffer.from(metadata.name).toString("utf8").replace(/\0/g, "");
-        const symbol = Buffer.from(metadata.symbol).toString("utf8").replace(/\0/g, "");
+        const name = Buffer.from(metadata.name)
+          .toString("utf8")
+          .replace(/\0/g, "");
+        const symbol = Buffer.from(metadata.symbol)
+          .toString("utf8")
+          .replace(/\0/g, "");
 
         const tokenInfo = {
           decimals: basicInfo.decimals,
@@ -296,7 +331,11 @@ async function getTokenMetadata(mintAddress: string) {
     return tokenInfo;
   } catch (error) {
     console.warn(`Error token info for ${mintAddress}:`, error);
-    return { decimals: 9, symbol: mintAddress, name: `Unknown Token ${mintAddress}` };
+    return {
+      decimals: 9,
+      symbol: mintAddress,
+      name: `Unknown Token ${mintAddress}`,
+    };
   }
 }
 
@@ -309,7 +348,9 @@ function calculateAmount(tokenData: any, nativeData: any, decimals: number) {
     return nativeData.amount / 1e9;
   }
   if (tokenData?.rawTokenAmount) {
-    return Number(tokenData.rawTokenAmount.tokenAmount) / Math.pow(10, decimals);
+    return (
+      Number(tokenData.rawTokenAmount.tokenAmount) / Math.pow(10, decimals)
+    );
   }
   return 0;
 }
