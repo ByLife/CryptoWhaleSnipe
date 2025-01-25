@@ -522,7 +522,7 @@ export class Autoload {
                 } = classification;
 
                 // If under $10,000, skip (your custom cutoff)
-                if (totalUsdValue < 10000) {
+                if (totalUsdValue < 2000) {
                   continue;
                 }
 
