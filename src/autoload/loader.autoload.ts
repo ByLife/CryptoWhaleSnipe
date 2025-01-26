@@ -430,9 +430,14 @@ export class Autoload {
       try {
         const wallets = await EthereumWallet.find();
         const currentTime = new Date();
-        // Last 3 hours:
+        // // Last 3 hours:
+        // const threeHoursAgo = Math.floor(
+        //   (currentTime.getTime() - 3 * 60 * 60 * 1000) / 1000
+        // );
+
+        // last 2 years (for testing)
         const threeHoursAgo = Math.floor(
-          (currentTime.getTime() - 3 * 60 * 60 * 1000) / 1000
+          (currentTime.getTime() - 2 * 365 * 24 * 60 * 60 * 1000) / 1000
         );
 
         for (const wallet of wallets) {
@@ -522,7 +527,7 @@ export class Autoload {
                 } = classification;
 
                 // If under $10,000, skip (your custom cutoff)
-                if (totalUsdValue < 2000) {
+                if (totalUsdValue < 1000) {
                   continue;
                 }
 
