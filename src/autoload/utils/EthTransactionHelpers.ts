@@ -72,12 +72,15 @@ export function parseTokenOperations(
       totalOut: number;
       totalIn: number;
       operations: any[];
+      contractAddress?: string; // Add this
     }
   >;
   spentEthAmount: number;
+  contractAddress2?: string; // Add this to track second contract
 } {
   const userIsSender = realFrom === userAddr;
   let spentEthAmount = 0;
+  let contractAddress2: string | undefined;
 
   // We'll store (symbol, decimals, price, marketCapUsd, totalOut, totalIn, operations)
   const tokenOperations = new Map<
@@ -90,6 +93,7 @@ export function parseTokenOperations(
       totalOut: number;
       totalIn: number;
       operations: any[];
+      contractAddress?: string;
     }
   >();
 
@@ -101,24 +105,10 @@ export function parseTokenOperations(
       symbol: "ETH",
       decimals: 18,
       price: fallbackEthPrice,
-      marketCapUsd: 0, // No direct marketcap here unless you want to add
+      marketCapUsd: 0,
       totalOut: realValueETH,
       totalIn: 0,
-      operations: [],
-    });
-  }
-
-  // If user is receiver of top-level ETH
-  if (!userIsSender && realTo === userAddr && realValueETH > 0) {
-    const fallbackEthPrice = 1700;
-    tokenOperations.set("0xETH_NATIVE", {
-      symbol: "ETH",
-      decimals: 18,
-      price: fallbackEthPrice,
-      marketCapUsd: 0,
-      totalOut: 0,
-      totalIn: realValueETH,
-      operations: [],
+      operations: []
     });
   }
 
@@ -131,15 +121,19 @@ export function parseTokenOperations(
     if (!tokenOperations.has(tokenAddr)) {
       tokenOperations.set(tokenAddr, {
         symbol: op.tokenInfo?.symbol || "UNKNOWN",
-        decimals: op.tokenInfo?.decimals
-          ? Number(op.tokenInfo.decimals)
-          : 18,
+        decimals: op.tokenInfo?.decimals ? Number(op.tokenInfo.decimals) : 18,
         price: op.tokenInfo?.price?.rate || 0,
-        marketCapUsd: op.tokenInfo?.price?.marketCapUsd || 0, // <--
+        marketCapUsd: op.tokenInfo?.price?.marketCapUsd || 0,
         totalOut: 0,
         totalIn: 0,
         operations: [],
+        contractAddress: tokenAddr // Store the contract address
       });
+
+      // If this is a second token operation, store its address
+      if (tokenOperations.size === 2) {
+        contractAddress2 = tokenAddr;
+      }
     }
 
     const tOp = tokenOperations.get(tokenAddr)!;
@@ -147,17 +141,15 @@ export function parseTokenOperations(
 
     const numericValue = parseFloat(op.value) / 10 ** tOp.decimals;
 
-    // If op.from is user => out
     if ((op.from || "").toLowerCase() === userAddr) {
       tOp.totalOut += numericValue;
     }
-    // If op.to is user => in
     if ((op.to || "").toLowerCase() === userAddr) {
       tOp.totalIn += numericValue;
     }
   }
 
-  return { tokenOperations, spentEthAmount };
+  return { tokenOperations, spentEthAmount, contractAddress2 };
 }
 
 // --------------- Classify + pick single token + sum up USD ---------------
@@ -428,7 +420,8 @@ export async function storeTransactionIfNeeded(
   outSymbols: string[],
   inSymbols: string[],
   chosenTokenUsdValue: number,
-  chosenTokenMarketCap: number
+  chosenTokenMarketCap: number,
+  contractAddress2?: string // Add this parameter
 ): Promise<void> {
   // Check if transaction is already stored
   const existing = await EtherTransaction.findOne({ hash: tx.hash });
@@ -451,9 +444,6 @@ export async function storeTransactionIfNeeded(
   }
 
   try {
-    // Insert new doc
-
-    Logger.fatal(`Contract address 2 : ${tx.contractAddress2}`);
     await EtherTransaction.create({
       hash: tx.hash,
       blockNumber: tx.blockNumber,
@@ -467,24 +457,15 @@ export async function storeTransactionIfNeeded(
       gasPrice: tx.gasPrice,
       isError: tx.isError,
       input: tx.input,
-
-      // existing contractAddress
       contractAddress: tx.contractAddress,
-
-      // NEW: contractAddress2 if your code is storing it
-      contractAddress2: tx.contractAddress2 || "",
-
+      contractAddress2: contractAddress2 || "", // Use the passed parameter
       cumulativeGasUsed: tx.cumulativeGasUsed,
       gasUsed: tx.gasUsed,
       confirmations: tx.confirmations,
-
-      // Original fields
       tokenName: tx.tokenName || "",
       tokenSymbol,
       tokenSymbol2,
       tokenDecimal: Number(tx.tokenDecimal) || 18,
-
-      // Enhanced tracking
       type,
       summary,
       outTokens: tokenDetails.outTokens,
@@ -495,8 +476,6 @@ export async function storeTransactionIfNeeded(
       timestamp: new Date(parseInt(tx.timeStamp) * 1000),
       singleTransaction:
         tokenDetails.outTokens.length <= 1 && tokenDetails.inTokens.length <= 1,
-
-      // NEW: Single token’s USD + marketCap
       singleTokenUsdValue: chosenTokenUsdValue,
       singleTokenMarketCap: chosenTokenMarketCap
     });

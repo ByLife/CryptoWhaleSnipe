@@ -192,7 +192,11 @@ export class Autoload { // This is the class that starts the server
           const currentTime = new Date();
           // Last 3 hours:
           const threeHoursAgo = Math.floor(
-            (currentTime.getTime() - 3 * 60 * 60 * 1000) / 1000
+            (currentTime.getTime() - 3 * 24 * 60 * 60 * 1000) / 1000
+          );
+          // last 3 days
+          const threeDaysAgo = Math.floor(
+            (currentTime.getTime() - 3 * 24 * 60 * 60 * 1000) / 1000
           );
   
           for (const wallet of wallets) {
@@ -236,7 +240,7 @@ export class Autoload { // This is the class that starts the server
                   const userAddr = address.toLowerCase();
   
                   // 3) Parse operations (ERC-20, plus top-level ETH if any)
-                  const { tokenOperations, spentEthAmount } = parseTokenOperations(
+                  const { tokenOperations, spentEthAmount, contractAddress2 } = parseTokenOperations(
                     txData,
                     userAddr,
                     realFrom,
@@ -280,9 +284,12 @@ export class Autoload { // This is the class that starts the server
                     totalUsdValue,
                     outSymbols,
                     inSymbols,
-                    chosenTokenUsdValue,      
-                    chosenTokenMarketCap      
+                    chosenTokenUsdValue,
+                    chosenTokenMarketCap,
+                    contractAddress2 
                   );
+
+                  Logger.log(`Contract Address 2: ${contractAddress2}`)
   
                   // Update wallet
                   wallet.lastTransaction = new Date();
