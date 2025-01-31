@@ -69,7 +69,7 @@ export default {
         }
 
         // check if usdPrice is > 5000
-        if (usdPrice > 5000) {
+        if (usdPrice < 2000) {
           continue;
         }
 
