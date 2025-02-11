@@ -9,6 +9,7 @@ services:
     environment:
       # set environment variables
       - NODE_ENV=staging
+    restart: unless-stopped
 networks:
   default:
     external:
