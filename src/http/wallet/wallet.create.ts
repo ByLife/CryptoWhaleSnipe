@@ -23,6 +23,8 @@ export default {
             }
 
             if(req.body.influencer && typeof req.body.influencer !== "boolean") throw "Invalid parameters: influencer must be a boolean"
+            if(req.body.smart !== undefined && typeof req.body.smart !== "boolean") throw "Invalid parameters: smart must be a boolean"
+            if(req.body.source !== undefined && typeof req.body.source !== "string") throw "Invalid parameters: source must be a string"
 
             // Make wallets lowercase for ethereum and bnb
             const wallets = req.body.chain !== 'solana' 
@@ -39,6 +41,7 @@ export default {
                     wallet = await EthereumWallet.findOne({username: req.body.username});
                     if(wallet) {
                         wallet.wallets = [...new Set([...wallet.wallets, ...wallets])];
+                        if(req.body.smart !== undefined) wallet.smart = req.body.smart;
                         savedWallet = await wallet.save();
                     } else {
                         savedWallet = await new EthereumWallet({
@@ -46,7 +49,11 @@ export default {
                             wallets: wallets,
                             influencer: req.body.influencer,
                             image,
-                            nickname
+                            nickname,
+                            smart: req.body.smart ?? false,
+                            source: req.body.source ?? "manual",
+                            // copy-bot wallets wait for the status check before being polled
+                            ...(req.body.smart ? { status: "pending" } : {}),
                         }).save();
                     }
                     break;

@@ -1,42 +1,49 @@
 import axios from "axios";
 import EtherTransaction from "../../database/models/EtherTransaction";
 import Logger from "../../logger";
+import { etherscan } from "./etherscan";
 
 // --------------- A simple delay ---------------
 export function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-// --------------- Fetch Etherscan tokenTx ---------------
+// --------------- Live ETH/USD price (cached 5 min) ---------------
+let ethPriceCache = { price: 0, at: 0 };
+export async function getEthUsdPrice(): Promise<number> {
+  if (ethPriceCache.price && Date.now() - ethPriceCache.at < 5 * 60 * 1000) {
+    return ethPriceCache.price;
+  }
+  try {
+    const res = await axios.get(
+      "https://coins.llama.fi/prices/current/coingecko:ethereum",
+      { timeout: 10000 }
+    );
+    const price = Number(res?.data?.coins?.["coingecko:ethereum"]?.price);
+    if (price > 0) ethPriceCache = { price, at: Date.now() };
+  } catch (err) {
+    Logger.warn(`ETH price fetch failed, using last known: ${String(err)}`);
+  }
+  return ethPriceCache.price;
+}
+
+// --------------- Fetch Etherscan tokenTx (API V2) ---------------
+// V1 (api.etherscan.io/api) was shut down: it now answers status "0" with a
+// deprecation string, which used to be returned as if it were a tx array.
+// We ask for the newest 1000 transfers (free-tier cap per call); the caller
+// only keeps the last few hours, so one page is enough.
+// Goes through the shared throttle (utils/etherscan.ts): the tx loop, the
+// wallet-status job and the paper trader share the same free-tier key.
 export async function fetchEtherscanTxs(
   address: string,
-  ethApiKey: string,
+  _ethApiKey?: string,
   retryCount = 3
 ): Promise<any[]> {
-  const url =
-    `https://api.etherscan.io/api` +
-    `?module=account&action=tokentx&address=${address}` +
-    `&startblock=0&endblock=99999999&sort=desc` +
-    `&apikey=${ethApiKey}`;
-
-  for (let attempt = 1; attempt <= retryCount; attempt++) {
-    try {
-      const response = await axios.get(url);
-      if (response?.data?.result) {
-        return response.data.result;
-      }
-      return [];
-    } catch (err: any) {
-      console.error(`Attempt #${attempt} for Etherscan tokenTx failed.`, err.message);
-      // If it's the last attempt, rethrow the error so upper layer can catch
-      if (attempt === retryCount) {
-        throw err;
-      }
-      // Otherwise wait a bit and retry
-      await new Promise((resolve) => setTimeout(resolve, 3000));
-    }
-  }
-  return [];
+  const res = await etherscan(
+    { module: "account", action: "tokentx", address, page: 1, offset: 1000, sort: "desc" },
+    retryCount
+  );
+  return Array.isArray(res) ? res : [];
 }
 
 // --------------- Fetch Ethplorer data for a given tx ---------------
@@ -60,7 +67,8 @@ export function parseTokenOperations(
   userAddr: string,
   realFrom: string,
   realTo: string,
-  realValueETH: number
+  realValueETH: number,
+  ethUsdPrice = 0
 ): {
   tokenOperations: Map<
     string,
@@ -96,11 +104,10 @@ export function parseTokenOperations(
   // If user is sender with top-level ETH
   if (userIsSender && realValueETH > 0) {
     spentEthAmount = realValueETH;
-    const fallbackEthPrice = 1700;
     tokenOperations.set("0xETH_NATIVE", {
       symbol: "ETH",
       decimals: 18,
-      price: fallbackEthPrice,
+      price: ethUsdPrice,
       marketCapUsd: 0, // No direct marketcap here unless you want to add
       totalOut: realValueETH,
       totalIn: 0,
@@ -110,11 +117,10 @@ export function parseTokenOperations(
 
   // If user is receiver of top-level ETH
   if (!userIsSender && realTo === userAddr && realValueETH > 0) {
-    const fallbackEthPrice = 1700;
     tokenOperations.set("0xETH_NATIVE", {
       symbol: "ETH",
       decimals: 18,
-      price: fallbackEthPrice,
+      price: ethUsdPrice,
       marketCapUsd: 0,
       totalOut: 0,
       totalIn: realValueETH,
@@ -214,12 +220,14 @@ export function classifyTransaction(
   // Build tokenDetails
   const tokenDetails = {
     outTokens: [] as {
+      address?: string;
       symbol: string;
       amount: number;
       usdValue: number;
       marketCapUsd: number;
     }[],
     inTokens: [] as {
+      address?: string;
       symbol: string;
       amount: number;
       usdValue: number;
@@ -227,6 +235,7 @@ export function classifyTransaction(
     }[],
     finalToken: null as
       | {
+          address?: string;
           symbol: string;
           amount: number;
           usdValue: number;
@@ -240,6 +249,7 @@ export function classifyTransaction(
     // outTokens
     if (data.totalOut > 0) {
       tokenDetails.outTokens.push({
+        address: addr,
         symbol: data.symbol,
         amount: data.totalOut,
         usdValue: data.totalOut * data.price,
@@ -249,6 +259,7 @@ export function classifyTransaction(
     // inTokens
     if (data.totalIn > 0) {
       tokenDetails.inTokens.push({
+        address: addr,
         symbol: data.symbol,
         amount: data.totalIn,
         usdValue: data.totalIn * data.price,
@@ -268,6 +279,7 @@ export function classifyTransaction(
       const finalAmt =
         parseFloat(lastIncomingOp.value) / 10 ** finalData.decimals;
       tokenDetails.finalToken = {
+        address: finalAddr,
         symbol: finalData.symbol,
         amount: finalAmt,
         usdValue: finalAmt * finalData.price,
@@ -367,6 +379,7 @@ export function buildSummary(
     }[];
     finalToken:
       | {
+          address?: string;
           symbol: string;
           amount: number;
           usdValue: number;
@@ -415,6 +428,7 @@ export async function storeTransactionIfNeeded(
     }[];
     finalToken:
       | {
+          address?: string;
           symbol: string;
           amount: number;
           usdValue: number;
@@ -453,9 +467,9 @@ export async function storeTransactionIfNeeded(
   try {
     // Insert new doc
 
-    Logger.fatal(`Contract address 2 : ${tx.contractAddress2}`);
     await EtherTransaction.create({
       hash: tx.hash,
+      wallet: tx.wallet,
       blockNumber: tx.blockNumber,
       timeStamp: tx.timeStamp,
       nonce: tx.nonce,

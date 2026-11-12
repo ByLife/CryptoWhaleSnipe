@@ -23,12 +23,17 @@ export default {
         },
       }).lean();
 
+      // one query for all wallets instead of one per transaction
+      const walletByAddress = new Map<string, any>();
+      for (const w of await EthereumWallet.find().lean())
+        for (const a of w.wallets || []) walletByAddress.set(a.toLowerCase(), w);
+
       const results: any = [];
       for (const tx of transactions) {
         // Find wallet that matches either from or to address
-        const wallet = await EthereumWallet.findOne({
-          wallets: { $in: [tx.from, tx.to] },
-        }).lean();
+        const wallet =
+          walletByAddress.get((tx.from || "").toLowerCase()) ||
+          walletByAddress.get((tx.to || "").toLowerCase());
 
         if (!wallet) continue;
 
@@ -38,7 +43,9 @@ export default {
         // Ensure both addresses are strings before checking
         const fromAddress = tx.from || "";
         const toAddress = tx.to || "";
-        const walletAddress = wallet.wallets.includes(fromAddress)
+        const walletAddress = wallet.wallets
+          .map((a: string) => a.toLowerCase())
+          .includes(fromAddress.toLowerCase())
           ? fromAddress
           : toAddress;
 

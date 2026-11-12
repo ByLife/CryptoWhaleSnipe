@@ -3,6 +3,7 @@
 import mongoose, { Document, Schema } from "mongoose";
 
 interface TokenDetail {
+    address?: string;
     symbol: string;
     amount: number;
     usdValue: number;
@@ -12,6 +13,7 @@ export interface EtherTransaction {
     blockNumber?: string;
     timeStamp?: string;
     hash: string;
+    wallet?: string; // tracked wallet this tx was fetched for
     nonce?: string;
     transactionIndex?: string;
     from?: string;
@@ -47,6 +49,7 @@ export interface EtherTransaction {
 }
 
 const TokenDetailSchema = new Schema({
+    address: String,
     symbol: String,
     amount: Number,
     usdValue: Number
@@ -56,6 +59,7 @@ const EtherTransactionSchema = new Schema({
     blockNumber: String,
     timeStamp: String,
     hash: { type: String, unique: true }, // Add unique index
+    wallet: { type: String, index: true },
     nonce: String,
     transactionIndex: String,
     from: String,

@@ -22,13 +22,17 @@ import {
   delay,
   fetchEtherscanTxs,
   fetchEthplorerData,
+  getEthUsdPrice,
   parseTokenOperations,
   storeTransactionIfNeeded,
 } from "./utils/EthTransactionHelpers";
 import { processSolSwaps } from "./utils/SolanaTransactionHelpers";
-import SignalTransactions, {
-  SignalTransaction,
-} from "../database/models/SignalTransactions";
+import SignalTransactions from "../database/models/SignalTransactions";
+import { Buy, copyConfig, detectSignals, signalConfig, toBuy } from "./signals";
+import { POLLED_WALLETS, walletStatusLoop } from "./walletStatus";
+import { regimeLoop } from "./regime";
+import { copyLoop } from "./copy";
+import { paperLoop } from "./paper";
 
 dotenv.config();
 
@@ -218,176 +222,76 @@ export class Autoload {
 
   public static async aggregateTransactions() {
     try {
-      // Get wallets
-      const walletsEth = await EthereumWallet.find().lean();
-      const walletsSol = await SolanaWallet.find().lean();
+      const cfg = signalConfig();
+      const now = new Date();
+      const since = new Date(now.getTime() - 2 * cfg.windowDays * 86400_000);
 
-      const ethAddresses = new Set(
-        walletsEth.map((w) => w.wallets[0].toLowerCase())
-      );
-      const solAddresses = new Set(
-        walletsSol.map((w) => w.wallets[0].toLowerCase())
-      );
+      const [walletsEth, walletsSol] = await Promise.all([
+        EthereumWallet.find().lean(),
+        SolanaWallet.find().lean(),
+      ]);
+      // every address (not just wallets[0]) -> username
+      const ethUser = new Map<string, string>();
+      for (const w of walletsEth)
+        for (const a of w.wallets || []) ethUser.set(a.toLowerCase(), w.username);
+      const solUser = new Map<string, string>();
+      for (const w of walletsSol)
+        for (const a of w.wallets || []) solUser.set(a, w.username);
 
-      // Get transactions from last 3 weeks
-      const threeWeeksAgo = new Date(Date.now() - 3 * 7 * 24 * 60 * 60 * 1000);
-
-      const [transactionsEth, transactionsSol] = await Promise.all([
-        EtherTransaction.find({ timestamp: { $gte: threeWeeksAgo } }).lean(),
-        SolTransaction.find({ timestamp: { $gte: threeWeeksAgo } }).lean(),
+      const [txsEth, txsSol] = await Promise.all([
+        EtherTransaction.find({ timestamp: { $gte: since } }).lean(),
+        // SolTransaction has no `timestamp`, only blockTime (seconds)
+        SolTransaction.find({ blockTime: { $gte: Math.floor(since.getTime() / 1000) } }).lean(),
       ]);
 
-      const tokenWalletInteractions = new Map<string, Set<string>>();
-      const tokenSymbolCounts = new Map<string, number>();
-      let processedTx = 0;
-
-      const tokenData = new Map<string, TokenData>();
-
-      // Update processTransaction function
-      const processTransaction = (
-        tx: any,
-        wallet: string,
-        symbols: (string | undefined)[],
-        usdValue: number,
-        isBuy: boolean,
-        chain: "ETH" | "SOL"
-      ) => {
-        symbols.forEach((symbol) => {
-          if (!symbol) return;
-
-          if (!tokenWalletInteractions.has(symbol)) {
-            tokenWalletInteractions.set(symbol, new Set());
-            tokenSymbolCounts.set(symbol, 0);
-            tokenData.set(symbol, {
-              totalUsdValue: 0,
-              buys: 0,
-              sells: 0,
-              walletNames: new Set(),
-              chain,
-            });
-          }
-
-          const walletSet = tokenWalletInteractions.get(symbol)!;
-          const data = tokenData.get(symbol)!;
-
-          if (!walletSet.has(wallet)) {
-            walletSet.add(wallet);
-            tokenSymbolCounts.set(
-              symbol,
-              (tokenSymbolCounts.get(symbol) || 0) + 1
-            );
-            data.totalUsdValue += usdValue;
-            isBuy ? data.buys++ : data.sells++;
-            // Get wallet name from address
-            const ethWallet = walletsEth.find(
-              (w) => w.wallets[0].toLowerCase() === wallet
-            );
-            const solWallet = walletsSol.find(
-              (w) => w.wallets[0].toLowerCase() === wallet
-            );
-            const walletName =
-              ethWallet?.username || solWallet?.username || wallet.slice(0, 8);
-            data.walletNames.add(walletName);
-            processedTx++;
-          }
+      const buys: Buy[] = [];
+      for (const tx of txsEth) {
+        const wallet = (
+          tx.wallet ||
+          [tx.from, tx.to].map((a) => (a || "").toLowerCase()).find((a) => ethUser.has(a)) ||
+          ""
+        ).toLowerCase();
+        if (!wallet || !tx.timestamp) continue;
+        const b = toBuy(tx, {
+          chain: "ETH",
+          username: ethUser.get(wallet) || wallet.slice(0, 8),
+          wallet,
+          at: new Date(tx.timestamp),
         });
-      };
+        if (b) buys.push(b);
+      }
+      for (const tx of txsSol) {
+        const wallet = [tx.from, tx.to].find((a) => a && solUser.has(a)) || "";
+        if (!wallet || !tx.blockTime) continue;
+        const b = toBuy(tx, {
+          chain: "SOL",
+          username: solUser.get(wallet) || wallet.slice(0, 8),
+          wallet,
+          at: new Date(tx.blockTime * 1000),
+          fallbackToken: tx.contractAddress2,
+        });
+        if (b) buys.push(b);
+      }
 
-      // Process ETH transactions
-      for (const tx of transactionsEth) {
-        if (!tx.from || !tx.to) continue;
+      const cooldownStart = new Date(now.getTime() - cfg.cooldownDays * 86400_000);
+      const recent = await SignalTransactions.find(
+        // copy signals have their own cooldown (copy.ts)
+        { createdAt: { $gte: cooldownStart }, tokenAddress: { $exists: true }, type: { $ne: "copy" } },
+        { chain: 1, tokenAddress: 1 }
+      ).lean();
+      const recentlySignaled = new Set(recent.map((s) => `${s.chain}:${s.tokenAddress}`));
 
-        const fromAddress = tx.from.toLowerCase();
-        const toAddress = tx.to.toLowerCase();
-
-        const wallet = ethAddresses.has(fromAddress)
-          ? fromAddress
-          : ethAddresses.has(toAddress)
-          ? toAddress
-          : null;
-
-        if (wallet) {
-          const isBuy = toAddress === wallet;
-          const usdValue = tx.usdPrice || 0;
-          processTransaction(
-            tx,
-            wallet,
-            [tx.tokenSymbol, tx.tokenSymbol2],
-            usdValue,
-            isBuy,
-            "ETH"
+      const signals = detectSignals(buys, cfg, now, recentlySignaled);
+      if (signals.length) {
+        await SignalTransactions.insertMany(
+          signals.map((s) => ({ ...s, type: "buy", nWallets: s.walletNames.length }))
+        );
+        for (const s of signals)
+          Logger.info(
+            `[SIGNAL] ${s.fresh ? "NEW" : "late"} ${s.chain} ${s.tokenSymbol} ` +
+              `${s.walletNames.length} wallets $${Math.round(s.usdValue)}`
           );
-        }
       }
-
-      // Process SOL transactions
-      for (const tx of transactionsSol) {
-        if (!tx.from || !tx.to) continue;
-
-        const fromAddress = tx.from.toLowerCase();
-        const toAddress = tx.to.toLowerCase();
-
-        const wallet = solAddresses.has(fromAddress)
-          ? fromAddress
-          : solAddresses.has(toAddress)
-          ? toAddress
-          : null;
-
-        if (wallet) {
-          const isBuy = toAddress === wallet;
-          const usdValue = tx.totalUsdValue || 0;
-          const inTokens = tx.inTokens?.map((t) => t.symbol) || [];
-          const outTokens = tx.outTokens?.map((t) => t.symbol) || [];
-          processTransaction(
-            tx,
-            wallet,
-            [...inTokens, ...outTokens],
-            usdValue,
-            isBuy,
-            "SOL"
-          );
-        }
-      }
-
-      const blacklistedTokens = new Set<string>([
-        "WBTC",
-        "WETH",
-        "SOL",
-        "ETH",
-        "UNKNOWN",
-      ]);
-
-      const signalTransactions: SignalTransaction[] = [];
-
-      for (const [symbol, count] of tokenSymbolCounts.entries()) {
-        const data = tokenData.get(symbol)!;
-
-        if (
-          count <= 1 ||
-          blacklistedTokens.has(symbol) ||
-          Autoload.arrayStables.includes(symbol)
-        )
-          continue;
-
-        // check if tx is already in db
-        const existingTx = await SignalTransactions.findOne({
-          tokenSymbol: symbol,
-          type: data.buys >= data.sells ? "buy" : "sell",
-        });
-        if (existingTx) continue;
-
-        const signalTx = new SignalTransactions({
-          tokenSymbol: symbol,
-          wallets: Array.from(tokenWalletInteractions.get(symbol) || []),
-          usdValue: data.totalUsdValue,
-          type: data.buys >= data.sells ? "buy" : "sell",
-          walletNames: Array.from(data.walletNames),
-          chain: data.chain,
-        });
-        signalTransactions.push(signalTx);
-      }
-
-      await SignalTransactions.insertMany(signalTransactions);
       setTimeout(() => Autoload.aggregateTransactions(), 30000);
     } catch (error) {
       Logger.error(`[AGGREGATE] Error: ${String(error)}`);
@@ -428,7 +332,10 @@ export class Autoload {
   public static async fetchAndUpdateTransactions() {
     const processTransactions = async () => {
       try {
-        const wallets = await EthereumWallet.find();
+        // active wallets + legacy ones never checked (dormant / standby are skipped)
+        const wallets = await EthereumWallet.find(POLLED_WALLETS);
+        const storeMinUsd = Number(process.env.MIN_STORE_USD ?? 2000);
+        const smartMinUsd = Math.min(storeMinUsd, copyConfig().minBuyUsd);
         const currentTime = new Date();
         // Last 3 hours:
         const threeHoursAgo = Math.floor(
@@ -499,7 +406,8 @@ export class Autoload {
                     userAddr,
                     realFrom,
                     realTo,
-                    realValueETH
+                    realValueETH,
+                    await getEthUsdPrice()
                   );
 
                 // 4) Classify
@@ -521,8 +429,8 @@ export class Autoload {
                   chosenTokenMarketCap,
                 } = classification;
 
-                // If under $10,000, skip (your custom cutoff)
-                if (totalUsdValue < 2000) {
+                // Skip small transactions (smart wallets: the copy bot copies buys >= $300)
+                if (totalUsdValue < (wallet.smart ? smartMinUsd : storeMinUsd)) {
                   continue;
                 }
 
@@ -531,7 +439,7 @@ export class Autoload {
 
                 // Store in DB if not exist
                 await storeTransactionIfNeeded(
-                  tx,
+                  { ...tx, wallet: userAddr },
                   tokenDetails,
                   type,
                   summary,
@@ -637,6 +545,12 @@ export class Autoload {
       Autoload.fetchAndUpdateTransactions(); // Ethereum
       // Autoload.fetchAndUpdateSolanaTransactions(); // Solana
       Autoload.aggregateTransactions(); // Aggregate into Signals
+      if (process.env.COPY_BOT_ENABLED !== "false") {
+        regimeLoop(); // alt-season regime (copy bot ON/OFF)
+        walletStatusLoop(); // dormant / active wallets, daily
+        copyLoop(); // smart wallet buys -> COPY signals
+        paperLoop(); // paper positions: TP x10 or 30 days
+      }
       Autoload.rules();
       if (Autoload.app) {
         Autoload.app.use(bearerToken());
